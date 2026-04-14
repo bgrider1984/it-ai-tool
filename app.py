@@ -1,12 +1,14 @@
 from flask import Flask, render_template, request, jsonify
-import openai
+from openai import OpenAI
 import json
 import os
 
 app = Flask(__name__)
 
-# 🔑 OpenAI key from Render environment variables
-openai.api_key = os.environ.get("OPENAI_API_KEY")
+# ----------------------------
+# OpenAI Client (Modern SDK)
+# ----------------------------
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 # ----------------------------
 # Load Knowledge Base
@@ -26,7 +28,7 @@ def find_relevant_knowledge(user_input):
     return "\n".join(matches[:3])  # top 3 matches
 
 # ----------------------------
-# System Prompt (CORE BEHAVIOR)
+# System Prompt (IT Copilot Behavior)
 # ----------------------------
 SYSTEM_PROMPT = """
 You are a senior enterprise IT support engineer specializing in:
@@ -61,7 +63,7 @@ def home():
 
 @app.route("/ask", methods=["POST"])
 def ask():
-    user_input = request.json["message"]
+    user_input = request.json.get("message", "")
 
     knowledge = find_relevant_knowledge(user_input)
 
@@ -79,13 +81,13 @@ Relevant Internal Knowledge:
         }
     ]
 
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages
     )
 
     return jsonify({
-        "response": response["choices"][0]["message"]["content"]
+        "response": response.choices[0].message.content
     })
 
 
