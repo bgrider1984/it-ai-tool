@@ -4,7 +4,6 @@ from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
 
 app = Flask(__name__)
-
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 sessions = {}
@@ -17,51 +16,33 @@ def get_session(session_id):
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
             "history": [],
-            "last_issue": None
+            "context": None
         }
     return session_id, sessions[session_id]
 
 # ----------------------------
-# INTENT SWITCH
+# CONTEXT-AWARE AI ENGINE
 # ----------------------------
-def is_new_issue(prev, msg):
-    triggers = ["new issue", "actually", "instead", "different", "switch", "forget"]
-    if prev is None:
-        return True
-    return any(t in msg.lower() for t in triggers)
-
-# ----------------------------
-# HELP DESK COPILOT ENGINE (FAST MODE)
-# ----------------------------
-def helpdesk_response(issue, history):
+def generate_response(message, context, history):
 
     prompt = f"""
 You are a FAST Tier 2 IT Help Desk Copilot.
 
+You may be given a context hint to improve accuracy.
+
+Context hint: {context}
+
 RULES:
-- Be extremely concise
-- No long explanations
-- Prioritize fastest likely fix FIRST
-- Max 3–5 steps total
-- Format like a real IT help desk technician
-- Always include a "Try this first" section
-- Only escalate if needed
-
-FORMAT:
-
-🔴 TRY THIS FIRST:
-- step 1
-- step 2
-
-🟡 IF THAT DOESN'T WORK:
-- step 1
-- step 2
-
-🔵 IF STILL NOT FIXED:
-- escalation path
+- Be concise
+- Prioritize fastest fix first
+- Max 3–5 steps
+- Format as:
+  🔴 Try this first
+  🟡 If that doesn't work
+  🔵 If still broken
 
 Issue:
-{issue}
+{message}
 
 History:
 {history}
@@ -71,13 +52,13 @@ History:
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
-        max_tokens=450
+        max_tokens=500
     )
 
     return response.choices[0].message.content
 
 # ----------------------------
-# ROUTE
+# ROUTES
 # ----------------------------
 @app.route("/")
 def home():
@@ -90,17 +71,21 @@ def ask():
 
     session_id = data.get("session_id")
     message = data.get("message", "")
+    context = data.get("context", None)
 
     session_id, session = get_session(session_id)
 
-    # reset context on new issue
-    if is_new_issue(session["last_issue"], message):
-        session["history"] = []
-
     session["history"].append(message)
-    session["last_issue"] = message
 
-    reply = helpdesk_response(message, session["history"])
+    # store context if provided
+    if context:
+        session["context"] = context
+
+    reply = generate_response(
+        message=message,
+        context=session["context"],
+        history=session["history"]
+    )
 
     return jsonify({
         "session_id": session_id,
