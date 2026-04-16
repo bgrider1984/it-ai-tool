@@ -1,170 +1,79 @@
 import os
 import uuid
-import json
 from flask import Flask, render_template, request, jsonify
-from openai import OpenAI
 
 app = Flask(__name__)
 
-api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    raise RuntimeError("Missing OPENAI_API_KEY")
-
-client = OpenAI(api_key=api_key)
-
-MEMORY_FILE = "memory.json"
-
 # ----------------------------
-# LOAD MEMORY
+# SESSIONS
 # ----------------------------
-def load_memory():
-    if not os.path.exists(MEMORY_FILE):
-        return {}
-    with open(MEMORY_FILE, "r") as f:
-        return json.load(f)
-
-def save_memory(data):
-    with open(MEMORY_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-
-memory = load_memory()
-
 sessions = {}
 
 # ----------------------------
-# ISSUE DETECTION
+# ISSUE DETECTION (CURRENT MESSAGE ONLY)
 # ----------------------------
-def detect_issues(text):
+def detect_issue(text):
     t = text.lower()
-    issues = []
 
     if "outlook" in t:
-        issues.append("outlook")
-    if "vpn" in t or "network" in t:
-        issues.append("network")
+        return "outlook"
+    if "vpn" in t:
+        return "vpn"
     if "login" in t:
-        issues.append("auth")
+        return "auth"
+    if "hot" in t or "overheating" in t or "heat" in t:
+        return "hardware_overheating"
 
-    return issues if issues else ["general"]
-
-# ----------------------------
-# UPDATE MEMORY (NEW)
-# ----------------------------
-def update_memory(issue, fix, result):
-    if issue not in memory:
-        memory[issue] = {}
-
-    if fix not in memory[issue]:
-        memory[issue][fix] = {"success": 0, "fail": 0}
-
-    if result == "yes":
-        memory[issue][fix]["success"] += 1
-    else:
-        memory[issue][fix]["fail"] += 1
-
-    save_memory(memory)
+    return "general"
 
 # ----------------------------
-# GET MEMORY INSIGHTS (NEW)
+# INTENT SWITCH DETECTION (NEW)
 # ----------------------------
-def get_memory_insights(issue):
-    if issue not in memory:
-        return ""
+def detect_intent_switch(prev_text, new_text):
+    if not prev_text:
+        return False
 
-    stats = memory[issue]
+    triggers = [
+        "new issue",
+        "different issue",
+        "actually",
+        "instead",
+        "switching",
+        "forget that",
+        "not that"
+    ]
 
-    ranked = sorted(
-        stats.items(),
-        key=lambda x: x[1]["success"] - x[1]["fail"],
-        reverse=True
-    )
+    new_lower = new_text.lower()
 
-    if not ranked:
-        return ""
-
-    best = ranked[0]
-
-    return f"Previous successful fix pattern: {best[0]} (Success: {best[1]['success']})"
-
-# ----------------------------
-# ROOT CAUSE ENGINE
-# ----------------------------
-def analyze_root_cause(failed_fixes, issues):
-    if not failed_fixes:
-        return None
-
-    score = {"network":0,"profile":0,"auth":0,"outlook":0}
-
-    for f in failed_fixes:
-        if f in ["reset_network"]:
-            score["network"] += 2
-        if f in ["new_profile"]:
-            score["profile"] += 2
-        if f in ["safe_mode"]:
-            score["outlook"] += 2
-
-    best = max(score, key=score.get)
-
-    if score[best] == 0:
-        return None
-
-    return {
-        "root_cause": best,
-        "confidence": "High" if score[best] >= 3 else "Medium"
-    }
+    return any(t in new_lower for t in triggers)
 
 # ----------------------------
-# AI ENGINE
+# RESET SESSION STATE
 # ----------------------------
-def ai_next_steps(issues, history, memory_hint="", failed_fix=None):
-    prompt = f"""
-You are a Tier 2 IT engineer.
-
-Issues: {issues}
-History: {history}
-
-Memory Insight:
-{memory_hint}
-
-"""
-
-    if failed_fix:
-        prompt += f"\nPrevious fix failed: {failed_fix}\nAvoid repeating similar steps."
-
-    prompt += """
-Return ONLY JSON:
-
-{
-  "message": "short explanation",
-  "fixes": [
-    {"name": "fix_id", "label": "Fix Name", "confidence": "High"}
-  ]
-}
-"""
-
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=350
-    )
-
-    try:
-        return json.loads(response.choices[0].message.content)
-    except:
-        return {"message": "Try restarting Outlook.", "fixes": []}
+def reset_session(session):
+    session["history"] = []
+    session["current_issue"] = None
+    session["failed_fixes"] = []
 
 # ----------------------------
-# FIX INSTRUCTIONS
+# SIMPLE FIX ENGINE (PLACEHOLDER FOR NOW)
 # ----------------------------
-def get_fix_instructions(fix):
-    steps = {
-        "restart_outlook": "1. Task Manager → End Outlook → Reopen",
-        "safe_mode": "Win + R → outlook.exe /safe",
-        "new_profile": "Control Panel → Mail → Profiles → Add",
-        "reset_network": "ncpa.cpl → disable/enable adapter"
-    }
-    return steps.get(fix, "No instructions available.")
+def get_fixes(issue):
+    if issue == "outlook":
+        return [
+            {"name": "safe_mode", "label": "Start Outlook Safe Mode", "confidence": "High"},
+            {"name": "restart_outlook", "label": "Restart Outlook Process", "confidence": "Medium"}
+        ]
+
+    if issue == "hardware_overheating":
+        return [
+            {"name": "check_fans", "label": "Check Fan Operation", "confidence": "High"},
+            {"name": "close_apps", "label": "Reduce CPU Load", "confidence": "Medium"}
+        ]
+
+    return [
+        {"name": "basic_restart", "label": "Restart Device", "confidence": "High"}
+    ]
 
 # ----------------------------
 # ROUTE
@@ -179,97 +88,52 @@ def ask():
 
     session_id = data.get("session_id")
     message = data.get("message", "")
-    fix_request = data.get("run_fix")
-    feedback = data.get("feedback")
 
+    # ----------------------------
+    # INIT SESSION
+    # ----------------------------
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
             "history": [],
-            "issues": [],
-            "failed_fixes": [],
-            "last_fix": None
+            "current_issue": None,
+            "last_message": None,
+            "failed_fixes": []
         }
 
     session = sessions[session_id]
 
     # ----------------------------
-    # RUN FIX
+    # INTENT SWITCH CHECK
     # ----------------------------
-    if fix_request:
-        session["last_fix"] = fix_request
-        instructions = get_fix_instructions(fix_request)
+    switch = detect_intent_switch(session.get("last_message"), message)
 
-        return jsonify({
-            "session_id": session_id,
-            "response": instructions,
-            "fixes": [],
-            "ask_feedback": True,
-            "current_fix": fix_request
-        })
+    if switch:
+        reset_session(session)
+        response_prefix = "🔄 New issue detected — resetting context.\n\n"
+    else:
+        response_prefix = ""
 
-    # ----------------------------
-    # FEEDBACK + MEMORY UPDATE
-    # ----------------------------
-    if feedback:
-        fix = feedback.get("fix")
-        result = feedback.get("result")
-
-        primary_issue = session["issues"][0] if session["issues"] else "general"
-
-        update_memory(primary_issue, fix, result)
-
-        if result == "no":
-            session["failed_fixes"].append(fix)
-
-            rca = analyze_root_cause(session["failed_fixes"], session["issues"])
-
-            memory_hint = get_memory_insights(primary_issue)
-
-            ai_data = ai_next_steps(
-                session["issues"],
-                session["history"],
-                memory_hint=memory_hint,
-                failed_fix=fix
-            )
-
-            response_text = "Continuing troubleshooting..."
-
-            if rca:
-                response_text += f"\n\n🔍 Root Cause: {rca['root_cause']} ({rca['confidence']})"
-
-            return jsonify({
-                "session_id": session_id,
-                "response": response_text,
-                "fixes": ai_data["fixes"]
-            })
-
-        return jsonify({
-            "session_id": session_id,
-            "response": "Great — issue resolved 🎉",
-            "fixes": []
-        })
-
-    # ----------------------------
-    # NORMAL FLOW
-    # ----------------------------
+    session["last_message"] = message
     session["history"].append(message)
 
-    detected = detect_issues(message)
-    session["issues"] = list(set(session["issues"] + detected))
+    # ----------------------------
+    # DETECT ISSUE (ONLY FROM CURRENT MESSAGE)
+    # ----------------------------
+    issue = detect_issue(message)
+    session["current_issue"] = issue
 
-    memory_hint = get_memory_insights(session["issues"][0])
+    # ----------------------------
+    # GENERATE FIXES
+    # ----------------------------
+    fixes = get_fixes(issue)
 
-    ai_data = ai_next_steps(
-        session["issues"],
-        session["history"],
-        memory_hint=memory_hint
-    )
+    response = response_prefix + f"Detected issue: {issue}"
 
     return jsonify({
         "session_id": session_id,
-        "response": ai_data["message"],
-        "fixes": ai_data["fixes"]
+        "response": response,
+        "fixes": fixes
     })
 
 
