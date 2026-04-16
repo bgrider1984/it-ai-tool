@@ -20,45 +20,41 @@ client = OpenAI(api_key=api_key)
 sessions = {}
 
 # ----------------------------
-# FLOW CONFIGURATION
+# SYSTEM PROMPT (CORE ENGINE)
 # ----------------------------
-FLOW = {
-    "device": {
-        "question": "What type of device are you using?",
-        "options": ["Windows PC", "Mac", "Mobile Phone", "Printer"],
-        "next": "issue_type"
-    },
-    "issue_type": {
-        "question": "What type of issue are you experiencing?",
-        "options": ["Network problem", "Software issue", "Hardware issue", "Other"],
-        "next": "scope"
-    },
-    "scope": {
-        "question": "Is this happening to just you or multiple users?",
-        "options": ["Just me", "Multiple users"],
-        "next": "duration"
-    },
-    "duration": {
-        "question": "How long has this issue been happening?",
-        "options": ["Just started", "A few days", "Weeks or longer"],
-        "next": "error"
-    },
-    "error": {
-        "question": "Do you see any error messages?",
-        "options": ["Yes", "No"],
-        "next": "final"
-    }
-}
+SYSTEM_PROMPT = """
+You are an enterprise IT troubleshooting assistant.
+
+Your job:
+- Diagnose IT issues step-by-step
+- Ask ONLY one question at a time
+- Adapt dynamically based on user responses
+- Avoid repeating questions
+- Stop asking questions when enough information is collected
+
+When you have enough information, respond with:
+FINAL_DIAGNOSIS:
+then provide:
+1. Likely cause
+2. Step-by-step fix
+3. Commands (if applicable)
+4. Prevention tips
+
+Rules:
+- Be concise
+- Be technical
+- Never ask irrelevant questions
+"""
 
 # ----------------------------
-# HOME ROUTE
+# HOME
 # ----------------------------
 @app.route("/")
 def home():
     return render_template("index.html")
 
 # ----------------------------
-# MAIN CHAT ENDPOINT
+# MAIN ENDPOINT
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
@@ -72,147 +68,49 @@ def ask():
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
-            "step": "detect",
-            "issue": None,
-            "answers": {}
+            "messages": []
         }
 
     session = sessions[session_id]
-    step = session["step"]
 
     # ----------------------------
-    # STEP 1: DETECT ISSUE
+    # ADD USER MESSAGE
     # ----------------------------
-    if step == "detect":
-        if user_input:
-            response = client.chat.completions.create(
-                model="gpt-4.1-mini",
-                max_tokens=80,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "Classify the IT issue in max 6 words."
-                    },
-                    {"role": "user", "content": user_input}
-                ]
-            )
-
-            issue = response.choices[0].message.content.strip()
-
-            session["issue"] = issue
-            session["step"] = "confirm_issue"
-
-            return jsonify({
-                "session_id": session_id,
-                "response": f"I detected: {issue}. Is this correct?",
-                "options": ["Yes", "No"]
-            })
-
-        return jsonify({
-            "session_id": session_id,
-            "response": "Describe your issue (e.g. Outlook not opening).",
-            "options": []
-        })
+    session["messages"].append({"role": "user", "content": user_input})
 
     # ----------------------------
-    # STEP 2: CONFIRM ISSUE
+    # BUILD CONTEXT
     # ----------------------------
-    if step == "confirm_issue":
-        if user_input.lower() == "no":
-            session["step"] = "detect"
-            session["issue"] = None
-
-            return jsonify({
-                "session_id": session_id,
-                "response": "Please re-describe your issue.",
-                "options": []
-            })
-
-        if user_input.lower() == "yes":
-            session["step"] = "device"
-
-            node = FLOW["device"]
-
-            return jsonify({
-                "session_id": session_id,
-                "response": node["question"],
-                "options": node["options"]
-            })
-
-        return jsonify({
-            "session_id": session_id,
-            "response": "Please confirm: Is this correct?",
-            "options": ["Yes", "No"]
-        })
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.extend(session["messages"])
 
     # ----------------------------
-    # WIZARD FLOW (FIXED FINAL TRANSITION)
+    # AI CALL
     # ----------------------------
-    if step in FLOW:
-        node = FLOW[step]
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        max_tokens=600,
+        messages=messages
+    )
 
-        # store answer
-        if user_input:
-            session["answers"][step] = user_input
-
-            if node["next"]:
-                session["step"] = node["next"]
-                step = session["step"]
-
-        # ----------------------------
-        # FINAL STEP → RUN AI DIAGNOSIS IMMEDIATELY
-        # ----------------------------
-        if step == "final":
-            summary = session["answers"]
-
-            prompt = f"""
-Issue: {session.get('issue')}
-
-Device: {summary.get("device")}
-Issue Type: {summary.get("issue_type")}
-Scope: {summary.get("scope")}
-Duration: {summary.get("duration")}
-Error Messages: {summary.get("error")}
-
-Provide:
-1. Likely causes (ranked)
-2. Step-by-step troubleshooting
-3. Commands if applicable
-4. Escalation guidance
-"""
-
-            response = client.chat.completions.create(
-                model="gpt-4.1-mini",
-                max_tokens=600,
-                messages=[
-                    {"role": "system", "content": "You are a senior IT support engineer."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-
-            return jsonify({
-                "session_id": session_id,
-                "response": response.choices[0].message.content,
-                "options": []
-            })
-
-        # normal question step
-        node = FLOW[step]
-
-        return jsonify({
-            "session_id": session_id,
-            "response": node["question"],
-            "options": node["options"]
-        })
+    reply = response.choices[0].message.content
 
     # ----------------------------
-    # SAFETY FALLBACK
+    # STORE ASSISTANT RESPONSE
     # ----------------------------
+    session["messages"].append({"role": "assistant", "content": reply})
+
+    # ----------------------------
+    # DETECT FINAL DIAGNOSIS
+    # ----------------------------
+    is_final = "FINAL_DIAGNOSIS" in reply
+
     return jsonify({
         "session_id": session_id,
-        "response": "Let's continue troubleshooting.",
-        "options": []
+        "response": reply,
+        "done": is_final
     })
+
 
 # ----------------------------
 # RUN APP
