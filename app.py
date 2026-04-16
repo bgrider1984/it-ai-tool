@@ -17,9 +17,12 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
 # ----------------------------
-# USERS / INVITES
+# USERS / INVITES (BETA SIMPLE)
 # ----------------------------
-USERS = {"admin@local": {"password": "admin", "is_admin": True}}
+USERS = {
+    "admin@local": {"password": "admin", "is_admin": True}
+}
+
 INVITES = set()
 
 # ----------------------------
@@ -28,32 +31,47 @@ INVITES = set()
 class ChatHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user = db.Column(db.String(120))
-    role = db.Column(db.String(20))  # user / assistant
+    role = db.Column(db.String(20))
     message = db.Column(db.Text)
     session_id = db.Column(db.String(80))
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 # ----------------------------
-# SESSION MEMORY
+# SESSION MEMORY (IN-MEMORY INDEX)
 # ----------------------------
+SESSION_INDEX = {}
+
 sessions = {}
+
+# ----------------------------
+# HELPERS
+# ----------------------------
+def get_session_title(message):
+    t = message.lower()
+    if "vpn" in t:
+        return "VPN Issue"
+    if "outlook" in t:
+        return "Outlook Issue"
+    if "login" in t:
+        return "Login Issue"
+    if "crash" in t:
+        return "System Crash"
+    if "slow" in t:
+        return "Performance Issue"
+    return "General IT Issue"
 
 def get_session():
     sid = session.get("sid")
+
     if not sid:
         sid = str(uuid.uuid4())
         session["sid"] = sid
-        sessions[sid] = {"history": [], "issue": None}
-    return sessions[sid]
+        sessions[sid] = {"step": 0, "history": []}
+
+    return sid
 
 # ----------------------------
-# AUTH
-# ----------------------------
-def current_user():
-    return session.get("user")
-
-# ----------------------------
-# HOME
+# ROUTES
 # ----------------------------
 @app.route("/")
 def home():
@@ -66,7 +84,7 @@ def dashboard():
     return render_template("dashboard.html")
 
 # ----------------------------
-# LOGIN
+# LOGIN (BETA SIMPLE)
 # ----------------------------
 @app.route("/login", methods=["POST"])
 def login():
@@ -83,7 +101,7 @@ def login():
     return jsonify({"status": "ok"})
 
 # ----------------------------
-# ASK + SAVE HISTORY
+# ASK (COPILOT RESPONSE + HISTORY SAVE)
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
@@ -92,33 +110,40 @@ def ask():
         return jsonify({"error": "unauthorized"}), 401
 
     data = request.json
-    msg = data.get("message")
+    message = data.get("message", "")
 
-    sid = session.get("sid") or str(uuid.uuid4())
-    session["sid"] = sid
+    sid = get_session()
 
-    state = get_session()
-    state["history"].append(msg)
+    # create session index entry if new
+    if sid not in SESSION_INDEX:
+        SESSION_INDEX[sid] = {
+            "title": get_session_title(message),
+            "created": str(datetime.utcnow())
+        }
 
-    # simple intelligence
-    if "vpn" in msg.lower():
-        reply = "Check VPN connection and reconnect."
-    elif "outlook" in msg.lower():
-        reply = "Restart Outlook and test Safe Mode."
-    elif "crash" in msg.lower():
-        reply = "Check Task Manager for CPU/RAM spikes."
+    # simple AI logic (beta)
+    msg = message.lower()
+
+    if "vpn" in msg:
+        reply = "Check VPN connection → reconnect client."
+    elif "outlook" in msg:
+        reply = "Restart Outlook → try Safe Mode."
+    elif "crash" in msg:
+        reply = "Check Task Manager → CPU/RAM usage."
+    elif "slow" in msg:
+        reply = "Check disk usage and background processes."
     else:
-        reply = "Restart device and retest."
+        reply = "Restart device and re-test issue."
 
     # SAVE USER MESSAGE
     db.session.add(ChatHistory(
         user=session["user"],
         role="user",
-        message=msg,
+        message=message,
         session_id=sid
     ))
 
-    # SAVE AI RESPONSE
+    # SAVE ASSISTANT MESSAGE
     db.session.add(ChatHistory(
         user=session["user"],
         role="assistant",
@@ -134,23 +159,40 @@ def ask():
     })
 
 # ----------------------------
-# GET CHAT HISTORY (NEW)
+# LIST SESSIONS (SIDEBAR)
 # ----------------------------
-@app.route("/history")
-def history():
+@app.route("/sessions")
+def sessions_list():
+
+    if not session.get("user"):
+        return jsonify({"error": "unauthorized"}), 401
+
+    return jsonify([
+        {
+            "session_id": sid,
+            "title": data["title"],
+            "created": data["created"]
+        }
+        for sid, data in SESSION_INDEX.items()
+    ])
+
+# ----------------------------
+# LOAD SESSION HISTORY
+# ----------------------------
+@app.route("/load_session/<sid>")
+def load_session(sid):
 
     if not session.get("user"):
         return jsonify({"error": "unauthorized"}), 401
 
     chats = ChatHistory.query.filter_by(
-        user=session["user"]
+        session_id=sid
     ).order_by(ChatHistory.timestamp.asc()).all()
 
     return jsonify([
         {
             "role": c.role,
-            "message": c.message,
-            "time": str(c.timestamp)
+            "message": c.message
         }
         for c in chats
     ])
@@ -163,6 +205,7 @@ def health():
     return jsonify({
         "status": "ok",
         "users": len(USERS),
+        "sessions": len(SESSION_INDEX),
         "history_rows": ChatHistory.query.count()
     })
 
