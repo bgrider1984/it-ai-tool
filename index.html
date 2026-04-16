@@ -1,71 +1,120 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>IT Copilot</title>
+    <title>IT Troubleshooting Assistant</title>
+
     <style>
         body {
             font-family: Arial;
-            background: #121212;
-            color: #e0e0e0;
-            margin: 0;
-            padding: 20px;
-        }
-
-        h1 {
-            color: #4fc3f7;
-        }
-
-        textarea {
-            width: 100%;
-            height: 120px;
-            background: #1e1e1e;
+            background: #0f172a;
             color: white;
-            border: 1px solid #333;
-            padding: 10px;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
         }
 
-        button {
-            padding: 10px 15px;
-            margin-top: 10px;
-            background: #4fc3f7;
-            border: none;
-            cursor: pointer;
+        header {
+            padding: 15px;
+            background: #111827;
+            text-align: center;
+            font-size: 18px;
             font-weight: bold;
         }
 
-        .box {
-            margin-top: 20px;
-            background: #1e1e1e;
+        #chat {
+            flex: 1;
             padding: 15px;
-            border-left: 4px solid #4fc3f7;
+            overflow-y: auto;
+        }
+
+        .msg {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 8px;
+            max-width: 70%;
             white-space: pre-wrap;
+        }
+
+        .user {
+            background: #2563eb;
+            margin-left: auto;
+        }
+
+        .bot {
+            background: #1f2937;
+        }
+
+        #inputArea {
+            display: flex;
+            padding: 10px;
+            background: #111827;
+        }
+
+        input {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+        }
+
+        button {
+            margin-left: 10px;
+            padding: 10px 15px;
+            border: none;
+            background: #22c55e;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #16a34a;
         }
     </style>
 </head>
+
 <body>
 
-<h1>IT Copilot</h1>
+<header>🛠 IT Troubleshooting Assistant</header>
 
-<textarea id="input" placeholder="Describe the IT issue..."></textarea><br>
+<div id="chat"></div>
 
-<button onclick="ask()">Analyze Issue</button>
-
-<div id="output"></div>
+<div id="inputArea">
+    <input id="msg" placeholder="Type your issue..." />
+    <button onclick="sendMessage()">Send</button>
+</div>
 
 <script>
-async function ask() {
-    const message = document.getElementById("input").value;
+async function sendMessage() {
+    const input = document.getElementById("msg");
+    const text = input.value;
+    if (!text) return;
+
+    addMessage("user", text);
+    input.value = "";
 
     const res = await fetch("/ask", {
         method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({message})
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ message: text })
     });
 
     const data = await res.json();
+    addMessage("bot", data.response);
+}
 
-    document.getElementById("output").innerHTML =
-        `<div class="box">${data.response}</div>`;
+function addMessage(type, text) {
+    const chat = document.getElementById("chat");
+
+    const div = document.createElement("div");
+    div.className = "msg " + type;
+    div.innerText = text;
+
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
 }
 </script>
 
