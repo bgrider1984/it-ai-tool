@@ -1,170 +1,182 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>IT Copilot</title>
+import os
+import uuid
+import json
+from flask import Flask, render_template, request, jsonify
+from openai import OpenAI
 
-<style>
-body {
-    margin: 0;
-    font-family: Arial;
-    background: #0b1220;
-    color: white;
-}
+app = Flask(__name__)
 
-.container {
-    max-width: 900px;
-    margin: auto;
-    padding: 20px;
-}
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise RuntimeError("Missing OPENAI_API_KEY")
 
-#chat {
-    height: 70vh;
-    overflow-y: auto;
-    background: #111827;
-    padding: 15px;
-    border-radius: 10px;
-    display: flex;
-    flex-direction: column;
-}
+client = OpenAI(api_key=api_key)
 
-.msg {
-    margin: 6px 0;
-    padding: 10px;
-    border-radius: 10px;
-    max-width: 70%;
-}
+sessions = {}
 
-.user {
-    background: #2563eb;
-    align-self: flex-end;
-}
+# ----------------------------
+# ISSUE DETECTION
+# ----------------------------
+def detect_issues(text):
+    t = text.lower()
+    issues = []
 
-.bot {
-    background: #374151;
-    align-self: flex-start;
-}
+    if "outlook" in t:
+        issues.append("outlook")
+    if "vpn" in t or "network" in t:
+        issues.append("vpn")
+    if "login" in t:
+        issues.append("login")
 
-.fix-btn {
-    margin-top: 6px;
-    margin-right: 6px;
-    padding: 6px 10px;
-    border-radius: 6px;
-    border: none;
-    cursor: pointer;
-}
+    return issues if issues else ["general"]
 
-.high { background: #22c55e; }
-.medium { background: #eab308; }
-.low { background: #ef4444; }
+# ----------------------------
+# AI FIX SUGGESTIONS
+# ----------------------------
+def ai_next_steps(issues, history):
+    prompt = f"""
+You are a Tier 2 IT engineer.
 
-.inputArea {
-    display: flex;
-    gap: 10px;
-    margin-top: 10px;
-}
+Issues: {issues}
+History: {history}
 
-input {
-    flex: 1;
-    padding: 10px;
-    border-radius: 8px;
-    border: none;
-}
+Return ONLY JSON:
 
-button {
-    padding: 10px;
-    border-radius: 8px;
-    border: none;
-    background: #22c55e;
-}
-</style>
-</head>
+{{
+  "message": "short explanation",
+  "fixes": [
+    {{"name": "restart_outlook", "label": "Restart Outlook", "confidence": "High"}},
+    {{"name": "safe_mode", "label": "Open in Safe Mode", "confidence": "Medium"}},
+    {{"name": "new_profile", "label": "Create New Profile", "confidence": "Low"}}
+  ]
+}}
+"""
 
-<body>
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=300
+    )
 
-<div class="container">
-<h2>IT Copilot</h2>
+    try:
+        return json.loads(response.choices[0].message.content)
+    except:
+        return {"message": "Try restarting Outlook.", "fixes": []}
 
-<div id="chat"></div>
+# ----------------------------
+# FIX INSTRUCTIONS
+# ----------------------------
+def get_fix_instructions(fix):
+    steps = {
+        "restart_outlook": """Restart Outlook:
+1. Open Task Manager (Ctrl+Shift+Esc)
+2. End Microsoft Outlook
+3. Reopen Outlook""",
 
-<div class="inputArea">
-    <input id="input" placeholder="Describe your issue..." />
-    <button onclick="send()">Send</button>
-</div>
-</div>
+        "safe_mode": """Safe Mode:
+1. Win + R
+2. outlook.exe /safe
+3. Press Enter""",
 
-<script>
+        "new_profile": """New Profile:
+1. Control Panel
+2. Mail
+3. Show Profiles
+4. Add new profile""",
 
-let sessionId = localStorage.getItem("sessionId");
-const chat = document.getElementById("chat");
-const input = document.getElementById("input");
+        "reset_network": """Reset Network:
+1. Win + R
+2. ncpa.cpl
+3. Disable/Enable adapter"""
+    }
 
-input.addEventListener("keydown", e => {
-    if(e.key === "Enter") send();
-});
+    return steps.get(fix, "No instructions available.")
 
-function add(text, type, fixes=[]){
-    const div = document.createElement("div");
-    div.className = "msg " + type;
-    div.textContent = text;
+# ----------------------------
+# ROUTES
+# ----------------------------
+@app.route("/")
+def home():
+    return render_template("index.html")
 
-    // ADD MULTIPLE FIX BUTTONS
-    fixes.forEach(fix => {
-        const btn = document.createElement("button");
-        btn.className = "fix-btn " + fix.confidence.toLowerCase();
-        btn.textContent = `${fix.label} (${fix.confidence})`;
+@app.route("/ask", methods=["POST"])
+def ask():
+    data = request.json
+    session_id = data.get("session_id")
+    user_input = data.get("message", "")
+    fix_request = data.get("run_fix")
+    feedback = data.get("feedback")
 
-        btn.onclick = () => runFix(fix.name);
+    # ----------------------------
+    # CREATE SESSION
+    # ----------------------------
+    if not session_id or session_id not in sessions:
+        session_id = str(uuid.uuid4())
+        sessions[session_id] = {
+            "history": [],
+            "issues": [],
+            "last_fix": None,
+            "fix_results": {}
+        }
 
-        div.appendChild(document.createElement("br"));
-        div.appendChild(btn);
-    });
+    session = sessions[session_id]
 
-    chat.appendChild(div);
-    chat.scrollTop = chat.scrollHeight;
-}
+    # ----------------------------
+    # FEEDBACK LOOP (NEW)
+    # ----------------------------
+    if feedback:
+        fix = feedback.get("fix")
+        result = feedback.get("result")
 
-async function runFix(fix){
-    add("Running: " + fix, "user");
+        session["fix_results"][fix] = result
 
-    const res = await fetch("/ask", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-            run_fix: fix,
-            session_id: sessionId
+        # If failed → continue AI troubleshooting
+        if result == "no":
+            ai_data = ai_next_steps(session["issues"], session["history"])
+            return jsonify({
+                "session_id": session_id,
+                "response": "Got it — continuing troubleshooting...",
+                "fixes": ai_data["fixes"]
+            })
+
+        return jsonify({
+            "session_id": session_id,
+            "response": "Great — issue marked as resolved 🎉",
+            "fixes": []
         })
-    });
 
-    const data = await res.json();
-    add(data.response, "bot");
-}
+    # ----------------------------
+    # RUN FIX → SHOW INSTRUCTIONS
+    # ----------------------------
+    if fix_request:
+        instructions = get_fix_instructions(fix_request)
+        session["last_fix"] = fix_request
 
-async function send(){
-    const msg = input.value.trim();
-    if(!msg) return;
-
-    add(msg, "user");
-    input.value = "";
-
-    const res = await fetch("/ask", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-            message: msg,
-            session_id: sessionId
+        return jsonify({
+            "session_id": session_id,
+            "response": instructions,
+            "fixes": [],
+            "ask_feedback": True,
+            "current_fix": fix_request
         })
-    });
 
-    const data = await res.json();
+    # ----------------------------
+    # NORMAL CHAT
+    # ----------------------------
+    session["history"].append(user_input)
 
-    sessionId = data.session_id;
-    localStorage.setItem("sessionId", sessionId);
+    detected = detect_issues(user_input)
+    session["issues"] = list(set(session["issues"] + detected))
 
-    add(data.response, "bot", data.fixes);
-}
+    ai_data = ai_next_steps(session["issues"], session["history"])
 
-</script>
+    return jsonify({
+        "session_id": session_id,
+        "response": ai_data["message"],
+        "fixes": ai_data["fixes"]
+    })
 
-</body>
-</html>
+
+if __name__ == "__main__":
+    app.run(debug=True)
