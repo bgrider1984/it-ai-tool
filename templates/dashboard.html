@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>IT Copilot Dashboard v2</title>
+<title>IT Copilot Dashboard v2 Fixed</title>
 
 <style>
 body {
@@ -14,7 +14,6 @@ body {
     height:100vh;
 }
 
-/* SIDEBAR */
 .sidebar {
     width:280px;
     background:#111827;
@@ -34,7 +33,6 @@ body {
     background:#374151;
 }
 
-/* MAIN */
 .main {
     flex:1;
     display:flex;
@@ -44,6 +42,9 @@ body {
 .header {
     padding:10px;
     background:#111827;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
 }
 
 #chat {
@@ -89,15 +90,18 @@ button {
 
 <body>
 
+<!-- SIDEBAR -->
 <div class="sidebar">
     <h3>Sessions</h3>
     <div id="sessions"></div>
 </div>
 
+<!-- MAIN -->
 <div class="main">
 
 <div class="header">
-    <h3>IT Copilot</h3>
+    <div>IT Copilot</div>
+    <button onclick="logout()" style="background:#ef4444;">Logout</button>
 </div>
 
 <div id="chat"></div>
@@ -113,16 +117,47 @@ button {
 
 let currentSession = null;
 
+/* ----------------------------
+   UI HELPERS
+---------------------------- */
 function add(text, cls){
     const div = document.createElement("div");
     div.className = "msg " + cls;
     div.textContent = text;
     document.getElementById("chat").appendChild(div);
+    document.getElementById("chat").scrollTop = 999999;
 }
 
+/* ----------------------------
+   ENTER KEY FIX (IMPORTANT)
+---------------------------- */
+document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("input").addEventListener("keydown", function(e){
+        if(e.key === "Enter"){
+            e.preventDefault();
+            send();
+        }
+    });
+});
+
+/* ----------------------------
+   LOGOUT
+---------------------------- */
+function logout(){
+    fetch("/logout").then(() => {
+        window.location.href = "/";
+    });
+}
+
+/* ----------------------------
+   LOAD SESSIONS
+---------------------------- */
 async function loadSessions(){
 
     const res = await fetch("/sessions", {credentials:"include"});
+
+    if(!res.ok) return;
+
     const data = await res.json();
 
     const container = document.getElementById("sessions");
@@ -137,6 +172,9 @@ async function loadSessions(){
     });
 }
 
+/* ----------------------------
+   LOAD SESSION
+---------------------------- */
 async function loadSession(sid){
 
     currentSession = sid;
@@ -144,6 +182,11 @@ async function loadSession(sid){
     const res = await fetch("/load_session/" + sid, {
         credentials:"include"
     });
+
+    if(!res.ok){
+        add("Failed to load session", "bot");
+        return;
+    }
 
     const data = await res.json();
 
@@ -155,10 +198,16 @@ async function loadSession(sid){
     });
 }
 
+/* ----------------------------
+   SEND MESSAGE (FIXED ERROR HANDLING)
+---------------------------- */
 async function send(){
 
     const input = document.getElementById("input");
-    const msg = input.value;
+    const msg = input.value.trim();
+
+    if(!msg) return;
+
     input.value = "";
 
     add(msg, "user");
@@ -173,6 +222,11 @@ async function send(){
         })
     });
 
+    if(!res.ok){
+        add("Error: not logged in or server issue", "bot");
+        return;
+    }
+
     const data = await res.json();
 
     add(data.response, "bot");
@@ -180,6 +234,7 @@ async function send(){
     loadSessions();
 }
 
+/* INIT */
 loadSessions();
 
 </script>
