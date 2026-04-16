@@ -153,8 +153,15 @@ function renderOptions(options) {
 
     if (!options || options.length === 0) return;
 
-    // ADD UNCERTAINTY OPTION
-    const extendedOptions = [...options, "I am not sure"];
+    // ----------------------------
+    // CLEAN + DEDUP + CONTROLLED UI
+    // ----------------------------
+    const uniqueOptions = [...new Set(options)];
+
+    const extendedOptions = [
+        ...uniqueOptions.filter(opt => opt !== "I am not sure"),
+        "I am not sure"
+    ];
 
     const select = document.createElement("select");
 
@@ -173,13 +180,10 @@ function renderOptions(options) {
     select.onchange = () => {
         if (!select.value) return;
 
-        const value = select.value;
-
-        // Handle uncertainty explicitly
-        if (value === "I am not sure") {
-            sendMessage("User is unsure. Rephrase the question and explain it in simpler terms with examples.");
+        if (select.value === "I am not sure") {
+            sendMessage("User is unsure. Rephrase the question and explain it in simple terms with examples.");
         } else {
-            sendMessage(value);
+            sendMessage(select.value);
         }
 
         container.innerHTML = "";
