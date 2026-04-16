@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>IT Copilot Dashboard</title>
+<title>Dashboard</title>
 
 <style>
 body {
@@ -13,7 +13,6 @@ body {
     display:flex;
 }
 
-/* SIDEBAR */
 .sidebar {
     width:220px;
     background:#111827;
@@ -21,27 +20,11 @@ body {
     padding:15px;
 }
 
-.sidebar h2 {
-    font-size:18px;
-}
-
-.sidebar button {
-    width:100%;
-    margin-top:10px;
-    padding:10px;
-    background:#22c55e;
-    border:none;
-    color:white;
-    border-radius:6px;
-}
-
-/* MAIN */
 .main {
     flex:1;
     padding:20px;
 }
 
-/* CHAT */
 #chat {
     height:70vh;
     overflow-y:auto;
@@ -57,16 +40,9 @@ body {
     max-width:80%;
 }
 
-.user {
-    background:#2563eb;
-    margin-left:auto;
-}
+.user { background:#2563eb; margin-left:auto; }
+.bot { background:#374151; }
 
-.bot {
-    background:#374151;
-}
-
-/* INPUT */
 .input-row {
     display:flex;
     gap:10px;
@@ -80,12 +56,12 @@ input {
     border-radius:6px;
 }
 
-button.send {
-    background:#22c55e;
-    border:none;
-    color:white;
+button {
     padding:10px 15px;
+    border:none;
     border-radius:6px;
+    background:#22c55e;
+    color:white;
 }
 </style>
 </head>
@@ -93,13 +69,7 @@ button.send {
 <body>
 
 <div class="sidebar">
-    <h2>🧠 IT Copilot</h2>
-    <p>Beta System</p>
-
-    <button onclick="generateInvite()">Generate Invite</button>
-    <p id="inviteBox"></p>
-
-    <hr>
+    <h2>IT Copilot</h2>
     <a href="/logout" style="color:white;">Logout</a>
 </div>
 
@@ -110,81 +80,41 @@ button.send {
 <div id="chat"></div>
 
 <div class="input-row">
-    <input id="input" placeholder="Describe your issue..." />
-    <button class="send" onclick="send()">Send</button>
+    <input id="input" placeholder="Ask IT issue..." />
+    <button onclick="send()">Send</button>
 </div>
 
 </div>
 
 <script>
 
-function add(text, type, rawResponse=null){
-
+function add(text, type){
     const div = document.createElement("div");
     div.className = "msg " + type;
     div.textContent = text;
-
-    if(type === "bot"){
-
-        const btn1 = document.createElement("button");
-        btn1.innerText = "👍 Helpful";
-        btn1.onclick = () => feedback(text, true);
-
-        const btn2 = document.createElement("button");
-        btn2.innerText = "👎 Not Helpful";
-        btn2.onclick = () => feedback(text, false);
-
-        div.appendChild(document.createElement("br"));
-        div.appendChild(btn1);
-        div.appendChild(btn2);
-    }
-
     chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
 }
 
 async function send(){
 
-    const msg = input.value.trim();
+    const msg = document.getElementById("input").value.trim();
     if(!msg) return;
 
     add(msg,"user");
-    input.value = "";
+
+    document.getElementById("input").value = "";
 
     const res = await fetch("/ask", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
+        credentials: "include",
         body:JSON.stringify({message: msg})
     });
 
     const data = await res.json();
 
-    add(data.response,"bot");
-}
-
-async function feedback(response, helpful){
-
-    await fetch("/feedback", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-            message: input.value,
-            response: response,
-            helpful: helpful
-        })
-    });
-}
-
-async function generateInvite(){
-
-    const res = await fetch("/admin/invite", {
-        method:"POST"
-    });
-
-    const data = await res.json();
-
-    document.getElementById("inviteBox").innerText =
-        "Invite Code: " + data.invite;
+    add(data.response || data.error, "bot");
 }
 
 </script>
