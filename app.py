@@ -1,13 +1,10 @@
 from dotenv import load_dotenv
-load_dotenv(dotenv_path=".env")
+load_dotenv()
 
 import os
-print("DEBUG KEY:", os.getenv("OPENAI_API_KEY"))
-
 from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
 import json
-import os
 
 load_dotenv()
 
@@ -16,7 +13,14 @@ app = Flask(__name__)
 # ----------------------------
 # OpenAI Client (Modern SDK)
 # ----------------------------
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+api_key = os.getenv("OPENAI_API_KEY")
+
+print("DEBUG API KEY:", api_key)
+
+if not api_key:
+    raise Exception("OPENAI_API_KEY not loaded. Check .env file.")
+
+client = OpenAI(api_key=api_key)
 
 # ----------------------------
 # Load Knowledge Base
