@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Tier 2 AI Copilot</title>
+<title>IT Copilot</title>
 
 <style>
 body {
@@ -32,7 +32,7 @@ body {
     margin:8px 0;
     padding:10px;
     border-radius:8px;
-    max-width:85%;
+    max-width:90%;
     white-space:pre-wrap;
 }
 
@@ -47,16 +47,16 @@ body {
 }
 
 .step {
-    margin-top:6px;
-    padding:8px;
+    margin-top:10px;
+    padding:10px;
     background:#1f2937;
-    border-radius:6px;
+    border-radius:8px;
 }
 
 .inputArea {
     display:flex;
-    margin-top:10px;
     gap:10px;
+    margin-top:10px;
 }
 
 input {
@@ -72,7 +72,6 @@ button {
     border-radius:8px;
     background:#22c55e;
     color:white;
-    cursor:pointer;
 }
 </style>
 </head>
@@ -80,14 +79,14 @@ button {
 <body>
 
 <div class="container">
-    <h2>Tier 2 AI Copilot</h2>
+<h2>IT Copilot</h2>
 
-    <div id="chat"></div>
+<div id="chat"></div>
 
-    <div class="inputArea">
-        <input id="input" placeholder="Describe issue..." />
-        <button onclick="send()">Send</button>
-    </div>
+<div class="inputArea">
+<input id="input" placeholder="Describe issue..." />
+<button onclick="send()">Send</button>
+</div>
 </div>
 
 <script>
@@ -101,34 +100,46 @@ input.addEventListener("keydown", e => {
     if(e.key === "Enter") send();
 });
 
-function addBot(data){
+function renderBot(data){
 
     const div = document.createElement("div");
     div.className = "msg bot";
 
+    let parsed;
+
+    try {
+        parsed = JSON.parse(data.response);
+    } catch {
+        div.textContent = data.response;
+        chat.appendChild(div);
+        return;
+    }
+
     div.innerHTML = `
-        <b>Issue:</b> ${data.issue_summary}<br>
-        <b>Likely Cause:</b> ${data.likely_cause}<br>
-        <b>Confidence:</b> ${data.confidence}<br><br>
-        <b>Steps:</b>
+        <b>Issue:</b> ${parsed.issue_summary}<br>
+        <b>Cause:</b> ${parsed.likely_cause}<br>
+        <b>Confidence:</b> ${parsed.confidence}<br><br>
+        <b>START HERE:</b>
     `;
 
-    data.steps.forEach(s => {
-        const step = document.createElement("div");
-        step.className = "step";
-        step.innerHTML = `<b>${s.action}</b><br><small>${s.why}</small>`;
-        div.appendChild(step);
+    parsed.steps.forEach((step, i) => {
+
+        const s = document.createElement("div");
+        s.className = "step";
+
+        s.innerHTML = `
+            <b>${step.title}</b><br><br>
+            <b>Instructions:</b><br>
+            ${step.instructions.join("<br>")}<br><br>
+            <b>Expected:</b> ${step.expected}<br>
+            <b>If it fails:</b> ${step.if_failed}
+        `;
+
+        div.appendChild(s);
     });
 
     chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
-}
-
-function addUser(text){
-    const div = document.createElement("div");
-    div.className = "msg user";
-    div.textContent = text;
-    chat.appendChild(div);
 }
 
 async function send(){
@@ -136,7 +147,11 @@ async function send(){
     const msg = input.value.trim();
     if(!msg) return;
 
-    addUser(msg);
+    const user = document.createElement("div");
+    user.className = "msg user";
+    user.textContent = msg;
+    chat.appendChild(user);
+
     input.value = "";
 
     const res = await fetch("/ask", {
@@ -153,7 +168,7 @@ async function send(){
     sessionId = data.session_id;
     localStorage.setItem("sessionId", sessionId);
 
-    addBot(data.response);
+    renderBot(data);
 }
 
 </script>
