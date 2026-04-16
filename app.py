@@ -5,95 +5,100 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
-# ----------------------------
-# OPENAI SETUP
-# ----------------------------
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
     raise RuntimeError("Missing OPENAI_API_KEY")
 
 client = OpenAI(api_key=api_key)
 
-# ----------------------------
-# SESSION STORAGE (simple memory)
-# ----------------------------
 sessions = {}
 
-# ----------------------------
-# SYSTEM PROMPT (REAL IT COPILOT MODE)
-# ----------------------------
 SYSTEM_PROMPT = """
-You are a senior IT support engineer (Tier 2 level).
+You are a Tier 2 IT support engineer.
 
-Your job:
-- Quickly diagnose IT issues
-- Ask only necessary clarifying questions
-- Provide actionable steps
-- Avoid over-explaining
-- Keep responses short and practical
+Be:
+- extremely concise
+- action-focused
+- diagnostic
 
-Format:
-1. Likely cause
-2. Immediate next step
-3. Optional follow-up question (only if needed)
+Return format:
 
-Do NOT behave like a training system.
-Do NOT give multiple long teaching steps unless required.
+CAUSE: <likely cause>
+FIX:
+1. <step>
+2. <step>
+
+Then optionally provide up to 3 ACTIONS.
+
+ACTIONS RULES:
+- Only include real IT actions
+- Each action must be short
+- Include command or instruction
+
+Example:
+ACTIONS:
+- Safe Mode: outlook.exe /safe
+- Flush DNS: ipconfig /flushdns
 """
 
-# ----------------------------
-# HOME
-# ----------------------------
 @app.route("/")
 def home():
     return render_template("index.html")
 
-# ----------------------------
-# CHAT ENDPOINT
-# ----------------------------
+
 @app.route("/ask", methods=["POST"])
 def ask():
     data = request.json
-    user_input = data.get("message", "").strip()
+    user_input = data.get("message", "")
     session_id = data.get("session_id")
 
-    # init session
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
-        sessions[session_id] = {
-            "messages": []
-        }
+        sessions[session_id] = {"messages": []}
 
     session = sessions[session_id]
-
-    # store user message
     session["messages"].append({"role": "user", "content": user_input})
 
-    # build messages
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT}
     ]
-    messages.extend(session["messages"][-10:])  # keep last 10 messages only
+    messages.extend(session["messages"][-6:])
 
-    # call model
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=messages,
-        max_tokens=600
+        max_tokens=450,
+        temperature=0.3
     )
 
     reply = response.choices[0].message.content
 
-    # store assistant response
     session["messages"].append({"role": "assistant", "content": reply})
+
+    # ----------------------------
+    # SIMPLE ACTION PARSER
+    # ----------------------------
+    actions = []
+    if "ACTIONS" in reply:
+        try:
+            action_block = reply.split("ACTIONS:")[1].strip().split("\n")
+            for line in action_block:
+                if "-" in line:
+                    parts = line.replace("-", "").strip().split(":")
+                    if len(parts) == 2:
+                        actions.append({
+                            "label": parts[0].strip(),
+                            "command": parts[1].strip()
+                        })
+        except:
+            pass
 
     return jsonify({
         "session_id": session_id,
-        "response": reply
+        "response": reply.split("ACTIONS:")[0].strip(),
+        "actions": actions
     })
 
-# ----------------------------
-# RUN
-# ----------------------------
+
 if __name__ == "__main__":
     app.run(debug=True)
