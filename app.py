@@ -13,8 +13,11 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 # ----------------------------
 # Load Knowledge Base
 # ----------------------------
-with open("knowledge_base.json", "r") as f:
-    knowledge_base = json.load(f)
+try:
+    with open("knowledge_base.json", "r") as f:
+        knowledge_base = json.load(f)
+except:
+    knowledge_base = []
 
 def find_relevant_knowledge(user_input):
     user_input = user_input.lower()
