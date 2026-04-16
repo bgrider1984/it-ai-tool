@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="UTF-8">
 <title>IT Copilot Login</title>
 
 <style>
@@ -17,12 +18,16 @@ body {
 
 .card {
     background:#111827;
-    padding:20px;
+    padding:25px;
     border-radius:12px;
-    width:300px;
+    width:320px;
 }
 
-input, button {
+h2 {
+    margin-top:0;
+}
+
+input {
     width:100%;
     padding:10px;
     margin-top:10px;
@@ -31,9 +36,21 @@ input, button {
 }
 
 button {
-    background:#22c55e;
-    color:white;
+    width:100%;
+    padding:10px;
+    margin-top:10px;
+    border:none;
+    border-radius:6px;
     cursor:pointer;
+    color:white;
+}
+
+.signup {
+    background:#22c55e;
+}
+
+.login {
+    background:#2563eb;
 }
 </style>
 </head>
@@ -41,44 +58,72 @@ button {
 <body>
 
 <div class="card">
-<h2>IT Copilot</h2>
+    <h2>IT Copilot</h2>
 
-<input id="email" placeholder="Email">
-<input id="password" type="password" placeholder="Password">
+    <input id="email" placeholder="Email">
+    <input id="password" type="password" placeholder="Password">
 
-<button onclick="signup()">Sign Up</button>
-<button onclick="login()">Login</button>
+    <button class="signup" onclick="signup()">Sign Up</button>
+    <button class="login" onclick="login()">Login</button>
 </div>
 
 <script>
+
+function getFormData(){
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value.trim();
+
+    return { email, password };
+}
+
 async function signup(){
-    await fetch("/signup", {
+
+    const { email, password } = getFormData();
+
+    if(!email || !password){
+        alert("Please enter email and password");
+        return;
+    }
+
+    const res = await fetch("/signup", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-            email: email.value,
-            password: password.value
-        })
+        body:JSON.stringify({ email, password })
     });
-    alert("Account created");
+
+    const data = await res.json();
+
+    if(res.ok){
+        alert("Account created. You can now log in.");
+    } else {
+        alert(data.error || "Signup failed");
+    }
 }
 
 async function login(){
+
+    const { email, password } = getFormData();
+
+    if(!email || !password){
+        alert("Please enter email and password");
+        return;
+    }
+
     const res = await fetch("/login", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-            email: email.value,
-            password: password.value
-        })
+        body:JSON.stringify({ email, password })
     });
+
+    const data = await res.json();
 
     if(res.ok){
         window.location.href = "/dashboard";
     } else {
-        alert("Login failed");
+        alert(data.error || "Login failed");
     }
 }
+
 </script>
 
 </body>
