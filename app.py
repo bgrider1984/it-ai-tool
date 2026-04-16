@@ -1,40 +1,56 @@
 import os
 import uuid
+from datetime import datetime
 from flask import Flask, request, jsonify, session, redirect, render_template
+from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
 
-# ----------------------------
-# CORE CONFIG
-# ----------------------------
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = True
 
-# ----------------------------
-# IN-MEMORY STORAGE (BETA MODE)
-# ----------------------------
-USERS = {}         # email -> {password, is_admin}
-INVITES = set()    # valid invite codes
-SESSIONS = {}      # session tracking
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///local.db")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# create default admin
-USERS["admin@local"] = {
-    "password": "admin",
-    "is_admin": True
-}
+db = SQLAlchemy(app)
 
 # ----------------------------
-# HEALTH CHECK
+# USERS / INVITES
 # ----------------------------
-@app.route("/health")
-def health():
-    return jsonify({
-        "status": "ok",
-        "users": len(USERS),
-        "active_sessions": len(SESSIONS)
-    })
+USERS = {"admin@local": {"password": "admin", "is_admin": True}}
+INVITES = set()
+
+# ----------------------------
+# CHAT HISTORY MODEL
+# ----------------------------
+class ChatHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user = db.Column(db.String(120))
+    role = db.Column(db.String(20))  # user / assistant
+    message = db.Column(db.Text)
+    session_id = db.Column(db.String(80))
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+# ----------------------------
+# SESSION MEMORY
+# ----------------------------
+sessions = {}
+
+def get_session():
+    sid = session.get("sid")
+    if not sid:
+        sid = str(uuid.uuid4())
+        session["sid"] = sid
+        sessions[sid] = {"history": [], "issue": None}
+    return sessions[sid]
+
+# ----------------------------
+# AUTH
+# ----------------------------
+def current_user():
+    return session.get("user")
 
 # ----------------------------
 # HOME
@@ -43,9 +59,6 @@ def health():
 def home():
     return render_template("index.html")
 
-# ----------------------------
-# DASHBOARD
-# ----------------------------
 @app.route("/dashboard")
 def dashboard():
     if not session.get("user"):
@@ -53,65 +66,24 @@ def dashboard():
     return render_template("dashboard.html")
 
 # ----------------------------
-# SIGNUP (INVITE REQUIRED)
-# ----------------------------
-@app.route("/signup", methods=["POST"])
-def signup():
-
-    data = request.json
-
-    email = data.get("email", "").strip()
-    password = data.get("password", "").strip()
-    invite = data.get("invite_code", "").strip()
-
-    if not email or not password:
-        return jsonify({"error": "missing fields"}), 400
-
-    if invite not in INVITES:
-        return jsonify({"error": "invalid invite"}), 403
-
-    if email in USERS:
-        return jsonify({"error": "user exists"}), 400
-
-    USERS[email] = {
-        "password": password,
-        "is_admin": False
-    }
-
-    INVITES.remove(invite)
-
-    return jsonify({"status": "created"})
-
-# ----------------------------
-# LOGIN (FIXED SESSION)
+# LOGIN
 # ----------------------------
 @app.route("/login", methods=["POST"])
 def login():
-
     data = request.json
-    email = data.get("email", "")
-    password = data.get("password", "")
 
-    user = USERS.get(email)
+    user = USERS.get(data.get("email"))
 
-    if not user or user["password"] != password:
+    if not user or user["password"] != data.get("password"):
         return jsonify({"error": "invalid login"}), 401
 
-    session["user"] = email
+    session["user"] = data.get("email")
     session.modified = True
 
     return jsonify({"status": "ok"})
 
 # ----------------------------
-# LOGOUT
-# ----------------------------
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect("/")
-
-# ----------------------------
-# ASK (COPILOT ENGINE SIMPLIFIED)
+# ASK + SAVE HISTORY
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
@@ -120,59 +92,85 @@ def ask():
         return jsonify({"error": "unauthorized"}), 401
 
     data = request.json
-    msg = data.get("message", "").lower()
+    msg = data.get("message")
 
-    if "vpn" in msg:
-        step = "Check VPN connection → reconnect VPN client"
-    elif "outlook" in msg:
-        step = "Restart Outlook → run in safe mode if needed"
-    elif "login" in msg:
-        step = "Verify password → check account lock status"
-    elif "crash" in msg:
-        step = "Check Task Manager → CPU/RAM usage"
+    sid = session.get("sid") or str(uuid.uuid4())
+    session["sid"] = sid
+
+    state = get_session()
+    state["history"].append(msg)
+
+    # simple intelligence
+    if "vpn" in msg.lower():
+        reply = "Check VPN connection and reconnect."
+    elif "outlook" in msg.lower():
+        reply = "Restart Outlook and test Safe Mode."
+    elif "crash" in msg.lower():
+        reply = "Check Task Manager for CPU/RAM spikes."
     else:
-        step = "Restart device → check issue again"
+        reply = "Restart device and retest."
+
+    # SAVE USER MESSAGE
+    db.session.add(ChatHistory(
+        user=session["user"],
+        role="user",
+        message=msg,
+        session_id=sid
+    ))
+
+    # SAVE AI RESPONSE
+    db.session.add(ChatHistory(
+        user=session["user"],
+        role="assistant",
+        message=reply,
+        session_id=sid
+    ))
+
+    db.session.commit()
 
     return jsonify({
-        "issue_detected": True,
-        "step": step
+        "response": reply,
+        "session_id": sid
     })
 
 # ----------------------------
-# ANALYTICS (FIXED BEHAVIOR)
+# GET CHAT HISTORY (NEW)
 # ----------------------------
-@app.route("/analytics")
-def analytics():
+@app.route("/history")
+def history():
 
     if not session.get("user"):
-        return redirect("/")
+        return jsonify({"error": "unauthorized"}), 401
 
-    user = session.get("user")
+    chats = ChatHistory.query.filter_by(
+        user=session["user"]
+    ).order_by(ChatHistory.timestamp.asc()).all()
 
+    return jsonify([
+        {
+            "role": c.role,
+            "message": c.message,
+            "time": str(c.timestamp)
+        }
+        for c in chats
+    ])
+
+# ----------------------------
+# HEALTH
+# ----------------------------
+@app.route("/health")
+def health():
     return jsonify({
-        "current_user": user,
-        "total_users": len(USERS),
-        "active_sessions": len(SESSIONS)
+        "status": "ok",
+        "users": len(USERS),
+        "history_rows": ChatHistory.query.count()
     })
 
 # ----------------------------
-# ADMIN: CREATE INVITE
-# ----------------------------
-@app.route("/admin/invite")
-def create_invite():
-
-    user = session.get("user")
-
-    if user != "admin@local":
-        return "forbidden", 403
-
-    code = str(uuid.uuid4())[:8]
-    INVITES.add(code)
-
-    return jsonify({"invite": code})
-
-# ----------------------------
-# INIT
+# INIT DB
 # ----------------------------
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
+
     app.run(host="0.0.0.0", port=10000)
