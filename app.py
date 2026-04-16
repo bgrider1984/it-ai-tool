@@ -1,162 +1,144 @@
 import os
-import sys
 import uuid
-from flask import Flask, request, jsonify, render_template
-
-# ----------------------------
-# SAFE IMPORT WRAPPERS
-# ----------------------------
-def safe_import(module_name):
-    try:
-        return __import__(module_name)
-    except Exception as e:
-        print(f"[WARN] Missing optional dependency: {module_name} -> {e}")
-        return None
-
-stripe = safe_import("stripe")
-bcrypt = safe_import("bcrypt")
-
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
 from openai import OpenAI
 
-# ----------------------------
-# APP INIT
-# ----------------------------
 app = Flask(__name__)
 
 # ----------------------------
-# ENV VALIDATION (NO CRASH)
+# SECURITY KEY (REQUIRED FOR LOGIN SESSIONS)
 # ----------------------------
-REQUIRED_ENV_VARS = [
-    "OPENAI_API_KEY",
-    "DATABASE_URL"
-]
-
-missing = [v for v in REQUIRED_ENV_VARS if not os.getenv(v)]
-
-if missing:
-    print(f"[FATAL CONFIG ERROR] Missing: {missing}")
-    # DO NOT CRASH HARD — allow Render to show error page
-    app.config["CONFIG_ERROR"] = True
-else:
-    app.config["CONFIG_ERROR"] = False
+app.secret_key = os.getenv("SECRET_KEY", "dev-secret-change-me")
 
 # ----------------------------
 # DATABASE
 # ----------------------------
-app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///fallback.db")
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///local.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
 # ----------------------------
-# OPENAI SAFE INIT
+# OPENAI
 # ----------------------------
 client = None
 if os.getenv("OPENAI_API_KEY"):
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ----------------------------
-# MODELS (SAFE)
+# MODELS
 # ----------------------------
-class Usage(db.Model):
+class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    session = db.Column(db.String(120))
-    issue = db.Column(db.Text)
+    email = db.Column(db.String(120), unique=True)
+    password = db.Column(db.String(120))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class ChatLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer)
+    message = db.Column(db.Text)
+    response = db.Column(db.Text)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 # ----------------------------
-# ERROR HANDLER (NO STACK TRACES TO USERS)
+# AI ENGINE
 # ----------------------------
-@app.errorhandler(Exception)
-def handle_error(e):
-    return jsonify({
-        "error": "Internal server error",
-        "message": str(e) if app.debug else "Something went wrong"
-    }), 500
+def ask_ai(message):
+    if not client:
+        return "AI not configured."
+
+    res = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[
+            {"role": "system", "content": "You are a fast Tier 2 IT Copilot. Give direct troubleshooting steps."},
+            {"role": "user", "content": message}
+        ],
+        temperature=0.2,
+        max_tokens=500
+    )
+    return res.choices[0].message.content
 
 # ----------------------------
-# HEALTH CHECK (RENDER USES THIS)
+# AUTH ROUTES
 # ----------------------------
-@app.route("/health")
-def health():
-    return jsonify({
-        "status": "ok",
-        "config_ok": not app.config["CONFIG_ERROR"],
-        "stripe_loaded": stripe is not None,
-        "bcrypt_loaded": bcrypt is not None,
-        "openai_loaded": client is not None
-    })
-
-# ----------------------------
-# HOME
-# ----------------------------
-@app.route("/")
+@app.route("/", methods=["GET"])
 def home():
-    if app.config["CONFIG_ERROR"]:
-        return """
-        <h2>⚠ Configuration Error</h2>
-        <p>Missing environment variables. Check server logs.</p>
-        """, 500
-
+    if "user_id" in session:
+        return redirect("/dashboard")
     return render_template("index.html")
 
+@app.route("/signup", methods=["POST"])
+def signup():
+    data = request.json
+
+    user = User(
+        email=data["email"],
+        password=data["password"]  # (upgrade later to bcrypt)
+    )
+
+    db.session.add(user)
+    db.session.commit()
+
+    return jsonify({"status": "created"})
+
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.json
+
+    user = User.query.filter_by(
+        email=data["email"],
+        password=data["password"]
+    ).first()
+
+    if not user:
+        return jsonify({"error": "invalid login"}), 401
+
+    session["user_id"] = user.id
+    return jsonify({"status": "logged_in"})
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/")
+
 # ----------------------------
-# AI ENGINE (SAFE FALLBACK)
+# DASHBOARD UI
 # ----------------------------
-def generate_response(message):
-
-    if client is None:
-        return "AI service not configured. Missing OPENAI_API_KEY."
-
-    try:
-        res = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{
-                "role": "user",
-                "content": f"You are an IT help desk copilot. Be concise.\n\nIssue: {message}"
-            }],
-            temperature=0.2,
-            max_tokens=400
-        )
-
-        return res.choices[0].message.content
-
-    except Exception as e:
-        return f"AI error fallback response: {str(e)}"
+@app.route("/dashboard")
+def dashboard():
+    if "user_id" not in session:
+        return redirect("/")
+    return render_template("dashboard.html")
 
 # ----------------------------
-# MAIN ENDPOINT
+# CHAT API
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
+    if "user_id" not in session:
+        return jsonify({"error": "unauthorized"}), 401
 
-    data = request.json or {}
-    message = data.get("message", "")
-    session_id = data.get("session_id", str(uuid.uuid4()))
+    data = request.json
+    message = data.get("message")
 
-    if not message:
-        return jsonify({"error": "No message provided"}), 400
+    response = ask_ai(message)
 
-    response = generate_response(message)
-
-    db.session.add(Usage(session=session_id, issue=message))
+    db.session.add(ChatLog(
+        user_id=session["user_id"],
+        message=message,
+        response=response
+    ))
     db.session.commit()
 
-    return jsonify({
-        "session_id": session_id,
-        "response": response
-    })
+    return jsonify({"response": response})
 
 # ----------------------------
-# SAFE STARTUP
+# INIT DB
 # ----------------------------
 if __name__ == "__main__":
-    try:
-        with app.app_context():
-            db.create_all()
+    with app.app_context():
+        db.create_all()
 
-        print("✅ Server starting safely...")
-        app.run(host="0.0.0.0", port=10000)
-
-    except Exception as e:
-        print(f"[FATAL STARTUP ERROR] {e}")
-        sys.exit(1)
+    app.run(host="0.0.0.0", port=10000)
