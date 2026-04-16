@@ -27,7 +27,7 @@ def detect_issue(text):
     return "general"
 
 # ----------------------------
-# MULTI-STEP TREE PLAYBOOKS
+# TREE PLAYBOOKS
 # ----------------------------
 PLAYBOOKS = {
     "outlook": {
@@ -39,7 +39,7 @@ PLAYBOOKS = {
                 "no": "error_check"
             },
             "disable_addins": {
-                "message": "Disable all add-ins (File → Options → Add-ins → COM Add-ins → Go). Restart Outlook normally.",
+                "message": "Disable all add-ins and restart Outlook normally.",
                 "end": True
             },
             "error_check": {
@@ -48,30 +48,11 @@ PLAYBOOKS = {
                 "no": "new_profile"
             },
             "error_specific": {
-                "message": "Capture the exact error message and search internal KB or Microsoft docs for targeted fix.",
+                "message": "Capture the exact error and check Microsoft docs.",
                 "end": True
             },
             "new_profile": {
-                "message": "Create a new Outlook profile (Control Panel → Mail → Show Profiles → Add).",
-                "end": True
-            }
-        }
-    },
-
-    "vpn": {
-        "start": "reset_adapter",
-        "nodes": {
-            "reset_adapter": {
-                "question": "Reset network adapter (ncpa.cpl). Did connection return?",
-                "yes": "resolved",
-                "no": "dns"
-            },
-            "dns": {
-                "message": "Run Command Prompt as admin → ipconfig /flushdns",
-                "end": True
-            },
-            "resolved": {
-                "message": "Connection restored. Monitor stability.",
+                "message": "Create a new Outlook profile.",
                 "end": True
             }
         }
@@ -79,24 +60,40 @@ PLAYBOOKS = {
 }
 
 # ----------------------------
-# SYSTEM PROMPT (AI FALLBACK)
+# AI DYNAMIC TROUBLESHOOTING
 # ----------------------------
-SYSTEM_PROMPT = """
-You are a Tier 2 IT engineer.
+def ai_next_step(issue, history):
+    prompt = f"""
+You are a Tier 2 IT engineer continuing troubleshooting.
 
-Be:
-- concise
-- diagnostic
-- adaptive
+Issue: {issue}
+
+Previous steps taken:
+{history}
+
+Provide:
+- The next best troubleshooting step
+- Be concise
+- Do NOT repeat previous steps
+- If needed, ask ONE focused question
 """
 
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=200,
+        temperature=0.3
+    )
+
+    return response.choices[0].message.content
+
+# ----------------------------
+# ROUTES
+# ----------------------------
 @app.route("/")
 def home():
     return render_template("index.html")
 
-# ----------------------------
-# MAIN CHAT
-# ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
     data = request.json
@@ -128,73 +125,61 @@ def ask():
     issue = session["issue"]
 
     # ----------------------------
-    # HANDLE TREE LOGIC
+    # TREE LOGIC
     # ----------------------------
     if issue in PLAYBOOKS and session["node"]:
-
         tree = PLAYBOOKS[issue]["nodes"]
-        current_node = tree[session["node"]]
+        current = tree[session["node"]]
 
-        # If user answering a question
-        if "question" not in current_node:
+        # QUESTION NODE
+        if "question" in current:
 
-            # move forward if message node
-            if current_node.get("end"):
-                session["node"] = None
-                return jsonify({
-                    "session_id": session_id,
-                    "response": current_node["message"]
-                })
-
-        # If question node
-        if "question" in current_node:
-
-            # If user already answered
-            if any(x in user_text for x in ["yes", "no"]):
-                if "yes" in user_text:
-                    next_node = current_node["yes"]
-                else:
-                    next_node = current_node["no"]
-
+            if "yes" in user_text or "no" in user_text:
+                next_node = current["yes"] if "yes" in user_text else current["no"]
                 session["node"] = next_node
+
                 next_data = tree[next_node]
 
-                if "message" in next_data:
+                if next_data.get("end"):
                     session["node"] = None
+
+                    # 🔥 AI CONTINUES AFTER TREE ENDS
+                    ai_reply = ai_next_step(issue, session["history"])
+
                     return jsonify({
                         "session_id": session_id,
-                        "response": next_data["message"]
+                        "response": next_data["message"] + "\n\n" + ai_reply
                     })
 
                 return jsonify({
                     "session_id": session_id,
-                    "response": next_data["question"]
+                    "response": next_data.get("question", next_data.get("message"))
                 })
 
-            # Ask the question
             return jsonify({
                 "session_id": session_id,
-                "response": current_node["question"]
+                "response": current["question"]
+            })
+
+        # MESSAGE NODE
+        if current.get("end"):
+            session["node"] = None
+
+            ai_reply = ai_next_step(issue, session["history"])
+
+            return jsonify({
+                "session_id": session_id,
+                "response": current["message"] + "\n\n" + ai_reply
             })
 
     # ----------------------------
-    # AI FALLBACK
+    # FULL AI MODE
     # ----------------------------
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": "\n".join(session["history"][-5:])}
-    ]
-
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=messages,
-        max_tokens=300,
-        temperature=0.3
-    )
+    ai_reply = ai_next_step(issue, session["history"])
 
     return jsonify({
         "session_id": session_id,
-        "response": response.choices[0].message.content
+        "response": ai_reply
     })
 
 
