@@ -5,12 +5,18 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
+# ----------------------------
+# OPENAI SETUP
+# ----------------------------
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
     raise RuntimeError("Missing OPENAI_API_KEY")
 
 client = OpenAI(api_key=api_key)
 
+# ----------------------------
+# SESSION STORE
+# ----------------------------
 sessions = {}
 
 # ----------------------------
@@ -32,7 +38,7 @@ def detect_issues(text):
     return issues if issues else ["general"]
 
 # ----------------------------
-# AI NEXT STEP WITH CONFIDENCE
+# AI NEXT STEP
 # ----------------------------
 def ai_next_step(issues, history):
     prompt = f"""
@@ -46,9 +52,9 @@ History:
 Respond with:
 1. Next best troubleshooting step
 2. Confidence level (High / Medium / Low)
-3. If applicable, provide a fix command label like: RUN_FIX: <short name>
+3. If applicable include: RUN_FIX: <fix_name>
 
-Keep it concise.
+Keep it short and actionable.
 """
 
     response = client.chat.completions.create(
@@ -61,14 +67,15 @@ Keep it concise.
     return response.choices[0].message.content
 
 # ----------------------------
-# AUTO FIX SIMULATION
+# FIX SIMULATION
 # ----------------------------
 def run_fix_simulation(fix_name):
     fixes = {
         "restart_outlook": "Outlook process restarted successfully.",
         "reset_network": "Network adapter reset completed.",
         "flush_dns": "DNS cache cleared.",
-        "new_profile": "New Outlook profile created."
+        "new_profile": "New Outlook profile created.",
+        "restart_pc": "System restart simulated successfully."
     }
 
     return fixes.get(fix_name, "Fix executed.")
@@ -86,6 +93,9 @@ def ask():
     user_input = data.get("message", "")
     session_id = data.get("session_id")
 
+    # ----------------------------
+    # CREATE SESSION
+    # ----------------------------
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
@@ -100,44 +110,50 @@ def ask():
     user_text = user_input.lower()
 
     # ----------------------------
-    # HANDLE FIX EXECUTION
+    # RUN FIX
     # ----------------------------
-    if user_text.startswith("run fix"):
+    if user_text == "run fix":
         if session["last_fix"]:
             result = run_fix_simulation(session["last_fix"])
             return jsonify({
                 "session_id": session_id,
-                "response": f"✅ Fix executed: {session['last_fix']}\n{result}"
+                "response": f"✅ Fix executed: {session['last_fix']}\n{result}",
+                "fix": None
             })
         else:
             return jsonify({
                 "session_id": session_id,
-                "response": "No fix available to run."
+                "response": "No fix available to run.",
+                "fix": None
             })
 
     # ----------------------------
-    # DETECT MULTIPLE ISSUES
+    # DETECT ISSUES
     # ----------------------------
     detected = detect_issues(user_input)
     session["issues"] = list(set(session["issues"] + detected))
 
     # ----------------------------
-    # AI DECISION ENGINE
+    # AI RESPONSE
     # ----------------------------
     ai_reply = ai_next_step(session["issues"], session["history"])
 
     # ----------------------------
-    # EXTRACT FIX LABEL
+    # EXTRACT FIX
     # ----------------------------
+    fix_name = None
+
     if "RUN_FIX:" in ai_reply:
         fix_name = ai_reply.split("RUN_FIX:")[1].strip().split()[0]
         session["last_fix"] = fix_name
 
-        ai_reply += f"\n\n👉 Type 'run fix' to execute: {fix_name}"
+        # remove tag from visible text
+        ai_reply = ai_reply.split("RUN_FIX:")[0].strip()
 
     return jsonify({
         "session_id": session_id,
         "response": ai_reply,
+        "fix": fix_name,
         "issues": session["issues"]
     })
 
