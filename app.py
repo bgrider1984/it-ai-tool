@@ -20,66 +20,59 @@ client = OpenAI(api_key=api_key)
 sessions = {}
 
 # ----------------------------
-# DETECT MISTAKE SIGNALS
+# CONFUSION DETECTION
 # ----------------------------
 def detect_confusion(messages):
-    """
-    Simple heuristic to detect if user is struggling.
-    """
-    recent = messages[-4:] if len(messages) >= 4 else messages
+    recent = messages[-4:]
+    text = " ".join([m["content"].lower() for m in recent if m["role"] == "user"])
 
-    text_blob = " ".join([m["content"].lower() for m in recent if m["role"] == "user"])
-
-    signals = 0
-
-    confusion_phrases = [
+    triggers = [
         "not sure",
-        "i don't know",
-        "no idea",
         "doesn't work",
-        "still not",
-        "same issue",
-        "nothing happens",
-        "didn't work"
+        "didn't work",
+        "still broken",
+        "no idea",
+        "same issue"
     ]
 
-    for phrase in confusion_phrases:
-        if phrase in text_blob:
-            signals += 1
-
-    return signals >= 2  # threshold for “user is struggling”
+    return sum(1 for t in triggers if t in text) >= 2
 
 # ----------------------------
-# SYSTEM PROMPT (ENHANCED COACH)
+# SKILL CLASSIFICATION
+# ----------------------------
+def calculate_skill(level_score):
+    if level_score < -2:
+        return "beginner"
+    elif level_score < 3:
+        return "intermediate"
+    else:
+        return "advanced"
+
+# ----------------------------
+# SYSTEM PROMPT
 # ----------------------------
 SYSTEM_PROMPT = """
 You are a senior IT engineer mentoring a junior technician.
 
-You operate in three modes:
+You adapt your teaching style based on user skill level:
 
-COACH MODE:
-- Teach while troubleshooting
-- One step at a time
+BEGINNER:
+- Very simple steps
+- Extra explanation
+- Slow progression
 
-FAST MODE:
-- No explanation
-- Only next step
+INTERMEDIATE:
+- Normal troubleshooting flow
+- Light explanation
 
-TRAINING MODE:
-- One step
-- Then ask what happened
+ADVANCED:
+- Minimal explanation
+- Fast diagnostic steps
 
-IMPORTANT BEHAVIOR RULES:
-- NEVER give multiple steps at once
-- ALWAYS wait for user response before advancing
-- Be concise and structured
-
-Response format:
-
-1. What I think is happening
-2. Next step (ONLY ONE)
-3. What to observe
-4. If it fails, next direction
+Rules:
+- ONE step at a time
+- NEVER overwhelm the user
+- Always wait for user response
 """
 
 # ----------------------------
@@ -97,7 +90,6 @@ def ask():
     data = request.json
     user_input = data.get("message", "").strip()
     session_id = data.get("session_id")
-    mode = data.get("mode", "coach")
 
     # ----------------------------
     # INIT SESSION
@@ -106,11 +98,11 @@ def ask():
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
             "messages": [],
-            "mode": "coach"
+            "skill_score": 0,
+            "skill": "beginner"
         }
 
     session = sessions[session_id]
-    session["mode"] = mode
 
     # ----------------------------
     # STORE USER MESSAGE
@@ -118,37 +110,48 @@ def ask():
     session["messages"].append({"role": "user", "content": user_input})
 
     # ----------------------------
-    # MISTAKE DETECTION
+    # CONFUSION CHECK
     # ----------------------------
-    struggling = detect_confusion(session["messages"])
+    confused = detect_confusion(session["messages"])
 
     # ----------------------------
-    # MODE INSTRUCTIONS
+    # UPDATE SKILL SCORE
     # ----------------------------
-    if mode == "fast":
-        mode_instruction = "FAST MODE: no explanation, only next action."
-    elif mode == "training":
-        mode_instruction = "TRAINING MODE: teach and ask what happened after each step."
+    if confused:
+        session["skill_score"] -= 1
     else:
-        mode_instruction = "COACH MODE: explain briefly and guide step-by-step."
+        session["skill_score"] += 1
+
+    session["skill"] = calculate_skill(session["skill_score"])
 
     # ----------------------------
-    # ADD MISTAKE DETECTION BEHAVIOR
+    # ADAPT BEHAVIOR BY SKILL
     # ----------------------------
-    if struggling:
-        mode_instruction += """
-USER APPEARS CONFUSED:
+    skill_instruction = ""
+
+    if session["skill"] == "beginner":
+        skill_instruction = "USER IS BEGINNER: explain simply and slowly."
+    elif session["skill"] == "intermediate":
+        skill_instruction = "USER IS INTERMEDIATE: normal troubleshooting pace."
+    else:
+        skill_instruction = "USER IS ADVANCED: be concise and technical."
+
+    # ----------------------------
+    # ADD CONFUSION OVERRIDE
+    # ----------------------------
+    if confused:
+        skill_instruction += """
+USER IS CONFUSED:
 - Slow down
-- Re-explain the last step more simply
-- Do NOT advance steps until user confirms understanding
-- Ask a single clarifying question if needed
+- Re-explain last step more clearly
+- Ask ONE clarifying question only
 """
 
     # ----------------------------
     # BUILD CONTEXT
     # ----------------------------
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT + "\n" + mode_instruction}
+        {"role": "system", "content": SYSTEM_PROMPT + "\n" + skill_instruction}
     ]
     messages.extend(session["messages"])
 
@@ -171,7 +174,9 @@ USER APPEARS CONFUSED:
     return jsonify({
         "session_id": session_id,
         "response": reply,
-        "confusion_detected": struggling
+        "skill": session["skill"],
+        "skill_score": session["skill_score"],
+        "confused": confused
     })
 
 
