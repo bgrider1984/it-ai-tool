@@ -8,8 +8,8 @@
 body {
     margin: 0;
     font-family: Arial;
-    color: white;
     background: #0b1220;
+    color: white;
 }
 
 .container {
@@ -18,27 +18,21 @@ body {
     padding: 20px;
 }
 
-h2 {
-    text-align: center;
-}
-
-/* CHAT */
 #chat {
     height: 70vh;
     overflow-y: auto;
     background: #111827;
-    border-radius: 10px;
     padding: 15px;
+    border-radius: 10px;
     display: flex;
     flex-direction: column;
 }
 
 .msg {
-    padding: 10px;
     margin: 6px 0;
+    padding: 10px;
     border-radius: 10px;
     max-width: 70%;
-    white-space: pre-wrap;
 }
 
 .user {
@@ -51,7 +45,19 @@ h2 {
     align-self: flex-start;
 }
 
-/* INPUT */
+.fix-btn {
+    margin-top: 6px;
+    margin-right: 6px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+}
+
+.high { background: #22c55e; }
+.medium { background: #eab308; }
+.low { background: #ef4444; }
+
 .inputArea {
     display: flex;
     gap: 10px;
@@ -60,17 +66,16 @@ h2 {
 
 input {
     flex: 1;
-    padding: 12px;
+    padding: 10px;
     border-radius: 8px;
     border: none;
 }
 
 button {
-    padding: 12px;
-    background: #22c55e;
-    border: none;
+    padding: 10px;
     border-radius: 8px;
-    cursor: pointer;
+    border: none;
+    background: #22c55e;
 }
 </style>
 </head>
@@ -78,85 +83,68 @@ button {
 <body>
 
 <div class="container">
-
 <h2>IT Copilot</h2>
 
 <div id="chat"></div>
 
 <div class="inputArea">
-    <input id="input" placeholder="Describe your IT issue..." />
+    <input id="input" placeholder="Describe your issue..." />
     <button onclick="send()">Send</button>
 </div>
-
 </div>
 
 <script>
 
 let sessionId = localStorage.getItem("sessionId");
-
 const chat = document.getElementById("chat");
 const input = document.getElementById("input");
 
-input.addEventListener("keydown", function(e){
-    if(e.key === "Enter"){
-        e.preventDefault();
-        send();
-    }
+input.addEventListener("keydown", e => {
+    if(e.key === "Enter") send();
 });
 
-function add(text, type, fix=null){
-    const wrapper = document.createElement("div");
-    wrapper.className = "msg " + type;
+function add(text, type, fixes=[]){
+    const div = document.createElement("div");
+    div.className = "msg " + type;
+    div.textContent = text;
 
-    const textDiv = document.createElement("div");
-    textDiv.textContent = text;
-
-    wrapper.appendChild(textDiv);
-
-    // FIX BUTTON
-    if(fix){
+    // ADD MULTIPLE FIX BUTTONS
+    fixes.forEach(fix => {
         const btn = document.createElement("button");
-        btn.textContent = "Run Fix";
-        btn.style.marginTop = "8px";
-        btn.style.background = "#22c55e";
-        btn.style.border = "none";
-        btn.style.padding = "6px 10px";
-        btn.style.borderRadius = "6px";
-        btn.style.cursor = "pointer";
+        btn.className = "fix-btn " + fix.confidence.toLowerCase();
+        btn.textContent = `${fix.label} (${fix.confidence})`;
 
-        btn.onclick = () => runFix(fix);
+        btn.onclick = () => runFix(fix.name);
 
-        wrapper.appendChild(btn);
-    }
+        div.appendChild(document.createElement("br"));
+        div.appendChild(btn);
+    });
 
-    chat.appendChild(wrapper);
+    chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
 }
 
-async function runFix(fixName){
-
-    add("Running fix: " + fixName, "user");
+async function runFix(fix){
+    add("Running: " + fix, "user");
 
     const res = await fetch("/ask", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-            message: "run fix",
+            run_fix: fix,
             session_id: sessionId
         })
     });
 
     const data = await res.json();
-
     add(data.response, "bot");
 }
 
 async function send(){
-
     const msg = input.value.trim();
     if(!msg) return;
 
-    add(msg,"user");
+    add(msg, "user");
     input.value = "";
 
     const res = await fetch("/ask", {
@@ -173,7 +161,7 @@ async function send(){
     sessionId = data.session_id;
     localStorage.setItem("sessionId", sessionId);
 
-    add(data.response, "bot", data.fix);
+    add(data.response, "bot", data.fixes);
 }
 
 </script>
