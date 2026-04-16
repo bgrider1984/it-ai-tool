@@ -54,8 +54,8 @@ h2 {
 .actions {
     margin-top: 5px;
     display: flex;
+    gap: 8px;
     flex-wrap: wrap;
-    gap: 6px;
 }
 
 .actionBtn {
@@ -97,14 +97,16 @@ button {
 <body>
 
 <div class="container">
+
 <h2>IT Copilot</h2>
 
 <div id="chat"></div>
 
 <div class="inputArea">
-    <input id="input" placeholder="Describe issue..." />
+    <input id="input" placeholder="Describe your issue..." />
     <button onclick="send()">Send</button>
 </div>
+
 </div>
 
 <script>
@@ -121,57 +123,91 @@ input.addEventListener("keydown", function(e){
     }
 });
 
-function addMessage(text, type, actions=[]){
+// ----------------------------
+// CHAT MESSAGE
+// ----------------------------
+function addMessage(text, type){
     const div = document.createElement("div");
     div.className = "msg " + type;
     div.textContent = text;
-
     chat.appendChild(div);
-
-    // ACTION BUTTONS
-    if(actions.length > 0){
-        const wrap = document.createElement("div");
-        wrap.className = "actions";
-
-        actions.forEach(a => {
-            const btn = document.createElement("button");
-            btn.className = "actionBtn";
-            btn.innerText = a.label;
-
-            btn.onclick = () => {
-                navigator.clipboard.writeText(a.command);
-                btn.innerText = "Copied!";
-                setTimeout(() => btn.innerText = a.label, 1000);
-            };
-
-            wrap.appendChild(btn);
-        });
-
-        chat.appendChild(wrap);
-    }
-
     chat.scrollTop = chat.scrollHeight;
 }
 
+// ----------------------------
+// ACTION RUNNER (GUIDED STEPS)
+// ----------------------------
+async function runAction(actionId){
+    let step = 0;
+
+    async function next(){
+        const res = await fetch("/action", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                action_id: actionId,
+                step: step
+            })
+        });
+
+        const data = await res.json();
+
+        if(data.done){
+            addMessage(data.message, "bot");
+            return;
+        }
+
+        addMessage(data.instruction, "bot");
+        step = data.next_step;
+    }
+
+    next();
+}
+
+// ----------------------------
+// SEND MESSAGE
+// ----------------------------
 async function send(){
 
     const msg = input.value.trim();
     if(!msg) return;
 
-    addMessage(msg,"user");
-    input.value="";
+    addMessage(msg, "user");
+    input.value = "";
 
-    const res = await fetch("/ask",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({message:msg, session_id:sessionId})
+    const res = await fetch("/ask", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            message: msg,
+            session_id: sessionId
+        })
     });
 
     const data = await res.json();
 
     sessionId = data.session_id;
 
-    addMessage(data.response,"bot", data.actions || []);
+    addMessage(data.response, "bot");
+
+    // render actions
+    if(data.actions && data.actions.length > 0){
+        const wrap = document.createElement("div");
+        wrap.className = "actions";
+
+        data.actions.forEach(a => {
+            const btn = document.createElement("button");
+            btn.className = "actionBtn";
+            btn.innerText = a.label;
+
+            btn.onclick = () => runAction(a.id);
+
+            wrap.appendChild(btn);
+        });
+
+        chat.appendChild(wrap);
+        chat.scrollTop = chat.scrollHeight;
+    }
 }
 
 </script>
