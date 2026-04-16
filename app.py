@@ -1,131 +1,170 @@
-import os
-import uuid
-import json
-from flask import Flask, render_template, request, jsonify
-from openai import OpenAI
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>IT Copilot</title>
 
-app = Flask(__name__)
+<style>
+body {
+    margin: 0;
+    font-family: Arial;
+    background: #0b1220;
+    color: white;
+}
 
-api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    raise RuntimeError("Missing OPENAI_API_KEY")
+.container {
+    max-width: 900px;
+    margin: auto;
+    padding: 20px;
+}
 
-client = OpenAI(api_key=api_key)
+#chat {
+    height: 70vh;
+    overflow-y: auto;
+    background: #111827;
+    padding: 15px;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+}
 
-sessions = {}
+.msg {
+    margin: 6px 0;
+    padding: 10px;
+    border-radius: 10px;
+    max-width: 70%;
+}
 
-# ----------------------------
-# ISSUE DETECTION
-# ----------------------------
-def detect_issues(text):
-    t = text.lower()
-    issues = []
+.user {
+    background: #2563eb;
+    align-self: flex-end;
+}
 
-    if "outlook" in t:
-        issues.append("outlook")
-    if "vpn" in t or "network" in t:
-        issues.append("vpn")
-    if "login" in t:
-        issues.append("login")
+.bot {
+    background: #374151;
+    align-self: flex-start;
+}
 
-    return issues if issues else ["general"]
+.fix-btn {
+    margin-top: 6px;
+    margin-right: 6px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+}
 
-# ----------------------------
-# AI MULTI-FIX GENERATOR
-# ----------------------------
-def ai_next_steps(issues, history):
-    prompt = f"""
-You are a Tier 2 IT engineer.
+.high { background: #22c55e; }
+.medium { background: #eab308; }
+.low { background: #ef4444; }
 
-Issues: {issues}
-History: {history}
+.inputArea {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
 
-Respond ONLY in JSON like this:
+input {
+    flex: 1;
+    padding: 10px;
+    border-radius: 8px;
+    border: none;
+}
 
-{{
-  "message": "short explanation",
-  "fixes": [
-    {{"name": "restart_outlook", "label": "Restart Outlook", "confidence": "High"}},
-    {{"name": "safe_mode", "label": "Open in Safe Mode", "confidence": "Medium"}},
-    {{"name": "new_profile", "label": "Create New Profile", "confidence": "Low"}}
-  ]
-}}
-"""
+button {
+    padding: 10px;
+    border-radius: 8px;
+    border: none;
+    background: #22c55e;
+}
+</style>
+</head>
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=300
-    )
+<body>
 
-    try:
-        return json.loads(response.choices[0].message.content)
-    except:
-        return {
-            "message": "Try restarting the application.",
-            "fixes": []
-        }
+<div class="container">
+<h2>IT Copilot</h2>
 
-# ----------------------------
-# FIX SIMULATION
-# ----------------------------
-def run_fix(fix):
-    results = {
-        "restart_outlook": "Outlook restarted successfully.",
-        "safe_mode": "Opened Outlook in Safe Mode.",
-        "new_profile": "New profile created.",
-        "reset_network": "Network reset complete."
-    }
-    return results.get(fix, "Fix executed.")
+<div id="chat"></div>
 
-# ----------------------------
-# ROUTES
-# ----------------------------
-@app.route("/")
-def home():
-    return render_template("index.html")
+<div class="inputArea">
+    <input id="input" placeholder="Describe your issue..." />
+    <button onclick="send()">Send</button>
+</div>
+</div>
 
-@app.route("/ask", methods=["POST"])
-def ask():
-    data = request.json
-    user_input = data.get("message", "")
-    fix_request = data.get("run_fix")
-    session_id = data.get("session_id")
+<script>
 
-    if not session_id or session_id not in sessions:
-        session_id = str(uuid.uuid4())
-        sessions[session_id] = {
-            "history": [],
-            "issues": []
-        }
+let sessionId = localStorage.getItem("sessionId");
+const chat = document.getElementById("chat");
+const input = document.getElementById("input");
 
-    session = sessions[session_id]
+input.addEventListener("keydown", e => {
+    if(e.key === "Enter") send();
+});
 
-    # ----------------------------
-    # RUN FIX
-    # ----------------------------
-    if fix_request:
-        result = run_fix(fix_request)
-        return jsonify({
-            "session_id": session_id,
-            "response": f"✅ {result}",
-            "fixes": []
+function add(text, type, fixes=[]){
+    const div = document.createElement("div");
+    div.className = "msg " + type;
+    div.textContent = text;
+
+    // ADD MULTIPLE FIX BUTTONS
+    fixes.forEach(fix => {
+        const btn = document.createElement("button");
+        btn.className = "fix-btn " + fix.confidence.toLowerCase();
+        btn.textContent = `${fix.label} (${fix.confidence})`;
+
+        btn.onclick = () => runFix(fix.name);
+
+        div.appendChild(document.createElement("br"));
+        div.appendChild(btn);
+    });
+
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+}
+
+async function runFix(fix){
+    add("Running: " + fix, "user");
+
+    const res = await fetch("/ask", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+            run_fix: fix,
+            session_id: sessionId
         })
+    });
 
-    session["history"].append(user_input)
+    const data = await res.json();
+    add(data.response, "bot");
+}
 
-    detected = detect_issues(user_input)
-    session["issues"] = list(set(session["issues"] + detected))
+async function send(){
+    const msg = input.value.trim();
+    if(!msg) return;
 
-    ai_data = ai_next_steps(session["issues"], session["history"])
+    add(msg, "user");
+    input.value = "";
 
-    return jsonify({
-        "session_id": session_id,
-        "response": ai_data["message"],
-        "fixes": ai_data["fixes"]
-    })
+    const res = await fetch("/ask", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+            message: msg,
+            session_id: sessionId
+        })
+    });
 
+    const data = await res.json();
 
-if __name__ == "__main__":
-    app.run(debug=True)
+    sessionId = data.session_id;
+    localStorage.setItem("sessionId", sessionId);
+
+    add(data.response, "bot", data.fixes);
+}
+
+</script>
+
+</body>
+</html>
