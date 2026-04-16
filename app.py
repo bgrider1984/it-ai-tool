@@ -20,35 +20,47 @@ client = OpenAI(api_key=api_key)
 sessions = {}
 
 # ----------------------------
-# SYSTEM PROMPT (COACH ENGINE)
+# SYSTEM PROMPT (COACH + TRAINING ENGINE)
 # ----------------------------
 SYSTEM_PROMPT = """
-You are a senior IT engineer mentoring a junior technician.
+You are a senior IT engineer acting as both:
 
-You operate in TWO MODES:
+1. Troubleshooting assistant
+2. Junior IT trainer
 
-MODE 1: COACH MODE (default)
-- Explain briefly WHY something is happening
-- Give ONE step at a time
-- Teach while troubleshooting
+You operate in three modes:
+
+MODE 1: COACH MODE
+- Explain briefly why
+- Give ONE step
+- Continue based on response
 
 MODE 2: FAST FIX MODE
 - No explanations
-- Only give the next action step
+- Only next action
+
+MODE 3: TRAINING MODE
+- Give ONE step
+- THEN ask what happened after the step
+- Reinforce learning
+- Confirm understanding before continuing
 
 Rules:
-- Never give multiple steps at once
-- Never ask more than ONE question at a time
-- Keep responses structured and predictable
+- Always give ONLY ONE step at a time
+- Never overwhelm the user
+- Never give multiple steps in a list
+- Keep responses structured
 
-Response format ALWAYS:
+Response format:
 
 1. What I think is happening
 2. Next step (ONLY ONE)
 3. What to observe
-4. If this fails, next direction
+4. If it fails, next direction
 
-Be concise and practical like a senior IT support engineer.
+In TRAINING MODE ONLY:
+Add at the end:
+"👉 What happened when you tried this?"
 """
 
 # ----------------------------
@@ -66,7 +78,7 @@ def ask():
     data = request.json
     user_input = data.get("message", "").strip()
     session_id = data.get("session_id")
-    mode = data.get("mode", "coach")  # coach or fast
+    mode = data.get("mode", "coach")
 
     # ----------------------------
     # INIT SESSION
@@ -79,18 +91,17 @@ def ask():
         }
 
     session = sessions[session_id]
-
-    # update mode if provided
     session["mode"] = mode
 
     # ----------------------------
-    # MODE INJECTION
+    # MODE INSTRUCTIONS
     # ----------------------------
-    mode_instruction = ""
-    if session["mode"] == "fast":
-        mode_instruction = "USER IS IN FAST FIX MODE: do NOT explain, only give next action."
+    if mode == "fast":
+        mode_instruction = "FAST FIX MODE: No explanations. Only next action."
+    elif mode == "training":
+        mode_instruction = "TRAINING MODE: Teach by doing. After each step, ask what happened."
     else:
-        mode_instruction = "USER IS IN COACH MODE: briefly explain reasoning before each step."
+        mode_instruction = "COACH MODE: Brief explanation plus next step."
 
     # ----------------------------
     # STORE USER MESSAGE
@@ -110,14 +121,14 @@ def ask():
     # ----------------------------
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
-        max_tokens=700,
+        max_tokens=800,
         messages=messages
     )
 
     reply = response.choices[0].message.content
 
     # ----------------------------
-    # STORE ASSISTANT RESPONSE
+    # STORE RESPONSE
     # ----------------------------
     session["messages"].append({"role": "assistant", "content": reply})
 
