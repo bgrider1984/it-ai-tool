@@ -1,34 +1,18 @@
-from pathlib import Path
-from dotenv import load_dotenv
 import os
-
-# ----------------------------
-# Load .env (bulletproof)
-# ----------------------------
-env_path = Path(__file__).resolve().parent / ".env"
-load_dotenv(dotenv_path=env_path)
-
-# ----------------------------
-# Debug (safe + single check)
-# ----------------------------
-api_key = os.getenv("OPENAI_API_KEY")
-print("DEBUG API KEY LOADED:", "YES" if api_key else "NO")
-
-if not api_key:
-    raise Exception("OPENAI_API_KEY not found. Check your .env file.")
-
-# ----------------------------
-# Imports (after env load)
-# ----------------------------
+import json
 from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
-import json
 
 app = Flask(__name__)
 
 # ----------------------------
-# OpenAI Client
+# Load API Key (Production-safe)
 # ----------------------------
+api_key = os.getenv("OPENAI_API_KEY")
+
+if not api_key:
+    raise RuntimeError("Missing OPENAI_API_KEY environment variable")
+
 client = OpenAI(api_key=api_key)
 
 # ----------------------------
@@ -37,7 +21,7 @@ client = OpenAI(api_key=api_key)
 try:
     with open("knowledge_base.json", "r") as f:
         knowledge_base = json.load(f)
-except:
+except Exception:
     knowledge_base = []
 
 def find_relevant_knowledge(user_input):
@@ -63,9 +47,7 @@ You are a senior enterprise IT support engineer specializing in:
 - VPN / networking issues
 - Enterprise desktop support
 
-You troubleshoot like a Tier 2/3 engineer.
-
-Always respond in this structure:
+Always respond in:
 
 1. Clarifying Questions
 2. Likely Causes (ranked)
@@ -74,7 +56,6 @@ Always respond in this structure:
 5. Escalation Conditions
 
 Be concise, technical, and action-oriented.
-Avoid generic advice.
 """
 
 # ----------------------------
@@ -115,33 +96,29 @@ Relevant Internal Knowledge:
         reply = response.choices[0].message.content
 
         # ----------------------------
-        # Usage + Cost Tracking
+        # Usage tracking
         # ----------------------------
         usage = response.usage
-        prompt_tokens = usage.prompt_tokens
-        completion_tokens = usage.completion_tokens
+        tokens = usage.total_tokens
 
-        input_cost = prompt_tokens * 0.0000004
-        output_cost = completion_tokens * 0.0000016
-        total_cost = input_cost + output_cost
-
-        print(f"Tokens: {usage.total_tokens} | Cost: ${total_cost:.6f}")
+        # rough cost estimate
+        cost = (usage.prompt_tokens * 0.0000004) + (usage.completion_tokens * 0.0000016)
 
         return jsonify({
             "response": reply,
-            "tokens": usage.total_tokens,
-            "cost": round(total_cost, 6)
+            "tokens": tokens,
+            "cost": round(cost, 6)
         })
 
     except Exception as e:
-        print("ERROR:", str(e))
         return jsonify({
-            "response": f"Server Error: {str(e)}"
+            "response": "Server error occurred.",
+            "error": str(e)
         }), 500
 
 
 # ----------------------------
-# Run App
+# Run locally only
 # ----------------------------
 if __name__ == "__main__":
     app.run(debug=True)
