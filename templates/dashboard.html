@@ -14,19 +14,14 @@ body {
     height:100vh;
 }
 
+/* SIDEBAR */
 .sidebar {
-    width:280px;
+    width:260px;
     background:#111827;
     padding:10px;
 }
 
-.session {
-    padding:10px;
-    margin:5px 0;
-    background:#1f2937;
-    cursor:pointer;
-}
-
+/* MAIN */
 .main {
     flex:1;
     display:flex;
@@ -34,26 +29,38 @@ body {
 }
 
 .header {
-    display:flex;
-    justify-content:space-between;
     padding:10px;
     background:#111827;
 }
 
 #chat {
     flex:1;
-    padding:10px;
     overflow-y:auto;
+    padding:15px;
+    display:flex;
+    flex-direction:column;
 }
 
+/* 🔥 FIXED CHAT BUBBLES */
 .msg {
-    margin:10px 0;
-    padding:10px;
-    border-radius:6px;
+    display:inline-block;
+    max-width:70%;
+    padding:10px 12px;
+    margin:6px 0;
+    border-radius:12px;
+    word-wrap:break-word;
+    white-space:pre-wrap;
 }
 
-.user { background:#2563eb; margin-left:auto; }
-.bot { background:#374151; }
+.user {
+    background:#2563eb;
+    align-self:flex-end;
+}
+
+.bot {
+    background:#374151;
+    align-self:flex-start;
+}
 
 .input-area {
     display:flex;
@@ -64,15 +71,18 @@ body {
 input {
     flex:1;
     padding:10px;
+    border:none;
+    border-radius:6px;
 }
 
 button {
     margin-left:10px;
-    padding:10px;
+    padding:10px 15px;
     background:#22c55e;
     border:none;
     color:white;
     cursor:pointer;
+    border-radius:6px;
 }
 </style>
 </head>
@@ -80,21 +90,20 @@ button {
 <body>
 
 <div class="sidebar">
-    <h3>Sessions</h3>
-    <div id="sessions"></div>
+    <h3>IT Copilot</h3>
 </div>
 
 <div class="main">
 
 <div class="header">
-    <div>IT Copilot</div>
+    <div>AI Troubleshooter</div>
     <button onclick="logout()">Logout</button>
 </div>
 
 <div id="chat"></div>
 
 <div class="input-area">
-    <input id="input" placeholder="Ask issue...">
+    <input id="input" placeholder="Ask your issue...">
     <button onclick="send()">Send</button>
 </div>
 
@@ -103,18 +112,16 @@ button {
 <script>
 
 function add(text, cls){
-    const d = document.createElement("div");
-    d.className = "msg " + cls;
-    d.textContent = text;
-    document.getElementById("chat").appendChild(d);
+    const div = document.createElement("div");
+    div.className = "msg " + cls;
+    div.textContent = text;
+    document.getElementById("chat").appendChild(div);
 }
 
-/* ENTER KEY FIX (ROBUST) */
+/* ENTER KEY FIX */
 document.addEventListener("keydown", function(e){
-    if(e.key === "Enter"){
-        if(document.activeElement.id === "input"){
-            send();
-        }
+    if(e.key === "Enter" && document.activeElement.id === "input"){
+        send();
     }
 });
 
@@ -135,32 +142,12 @@ async function send(){
     });
 
     const data = await res.json();
-
-    add(data.response || "No response", "bot");
+    add(data.response, "bot");
 }
 
 function logout(){
     window.location.href = "/logout";
 }
-
-async function loadSessions(){
-    const res = await fetch("/sessions", {credentials:"include"});
-    if(!res.ok) return;
-
-    const data = await res.json();
-
-    const c = document.getElementById("sessions");
-    c.innerHTML = "";
-
-    data.forEach(s => {
-        const d = document.createElement("div");
-        d.className = "session";
-        d.textContent = s.title;
-        c.appendChild(d);
-    });
-}
-
-loadSessions();
 
 </script>
 
