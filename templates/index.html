@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Diagnostic IT Assistant</title>
+<title>Tier 2 AI Copilot</title>
 
 <style>
 body {
@@ -13,7 +13,7 @@ body {
 }
 
 .container {
-    max-width:800px;
+    max-width:900px;
     margin:auto;
     padding:20px;
 }
@@ -32,7 +32,7 @@ body {
     margin:8px 0;
     padding:10px;
     border-radius:8px;
-    max-width:80%;
+    max-width:85%;
     white-space:pre-wrap;
 }
 
@@ -44,6 +44,13 @@ body {
 .bot {
     background:#374151;
     align-self:flex-start;
+}
+
+.step {
+    margin-top:6px;
+    padding:8px;
+    background:#1f2937;
+    border-radius:6px;
 }
 
 .inputArea {
@@ -73,7 +80,7 @@ button {
 <body>
 
 <div class="container">
-    <h2>Diagnostic IT Assistant</h2>
+    <h2>Tier 2 AI Copilot</h2>
 
     <div id="chat"></div>
 
@@ -94,12 +101,34 @@ input.addEventListener("keydown", e => {
     if(e.key === "Enter") send();
 });
 
-function add(text, type){
+function addBot(data){
+
     const div = document.createElement("div");
-    div.className = "msg " + type;
-    div.textContent = text;
+    div.className = "msg bot";
+
+    div.innerHTML = `
+        <b>Issue:</b> ${data.issue_summary}<br>
+        <b>Likely Cause:</b> ${data.likely_cause}<br>
+        <b>Confidence:</b> ${data.confidence}<br><br>
+        <b>Steps:</b>
+    `;
+
+    data.steps.forEach(s => {
+        const step = document.createElement("div");
+        step.className = "step";
+        step.innerHTML = `<b>${s.action}</b><br><small>${s.why}</small>`;
+        div.appendChild(step);
+    });
+
     chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
+}
+
+function addUser(text){
+    const div = document.createElement("div");
+    div.className = "msg user";
+    div.textContent = text;
+    chat.appendChild(div);
 }
 
 async function send(){
@@ -107,7 +136,7 @@ async function send(){
     const msg = input.value.trim();
     if(!msg) return;
 
-    add(msg, "user");
+    addUser(msg);
     input.value = "";
 
     const res = await fetch("/ask", {
@@ -124,7 +153,7 @@ async function send(){
     sessionId = data.session_id;
     localStorage.setItem("sessionId", sessionId);
 
-    add(data.response, "bot");
+    addBot(data.response);
 }
 
 </script>
