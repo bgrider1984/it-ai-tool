@@ -149,13 +149,16 @@ function renderMessage(msg) {
     const div = document.createElement("div");
     div.className = "msg " + (msg.role === "user" ? "user" : "bot");
 
-    div.innerText = msg.text;
+    // Create message text
+    const textDiv = document.createElement("div");
+    textDiv.innerText = msg.text;
+    div.appendChild(textDiv);
 
-    // show metadata for bot
+    // Add metadata for bot messages
     if (msg.role === "bot") {
         const meta = document.createElement("div");
         meta.className = "meta";
-        meta.innerText = `Tokens: ${msg.tokens || "?"} | Cost: $${msg.cost || "?"}`;
+        meta.innerText = `Tokens: ${msg.tokens ?? "?"} | Cost: $${msg.cost ?? "?"}`;
         div.appendChild(meta);
     }
 
