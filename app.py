@@ -4,13 +4,10 @@ from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
 
-# ----------------------------
-# SESSIONS
-# ----------------------------
 sessions = {}
 
 # ----------------------------
-# ISSUE DETECTION (CURRENT MESSAGE ONLY)
+# ISSUE DETECTION (NO STICKY GENERAL LOOP)
 # ----------------------------
 def detect_issue(text):
     t = text.lower()
@@ -19,61 +16,62 @@ def detect_issue(text):
         return "outlook"
     if "vpn" in t:
         return "vpn"
-    if "login" in t:
+    if "login" in t or "password" in t:
         return "auth"
-    if "hot" in t or "overheating" in t or "heat" in t:
+    if "hot" in t or "overheating" in t:
         return "hardware_overheating"
+    if "crash" in t or "freez" in t:
+        return "system_crash"
 
-    return "general"
-
-# ----------------------------
-# INTENT SWITCH DETECTION (NEW)
-# ----------------------------
-def detect_intent_switch(prev_text, new_text):
-    if not prev_text:
-        return False
-
-    triggers = [
-        "new issue",
-        "different issue",
-        "actually",
-        "instead",
-        "switching",
-        "forget that",
-        "not that"
-    ]
-
-    new_lower = new_text.lower()
-
-    return any(t in new_lower for t in triggers)
+    return "unknown"
 
 # ----------------------------
-# RESET SESSION STATE
+# SMART TROUBLESHOOTING ENGINE
 # ----------------------------
-def reset_session(session):
-    session["history"] = []
-    session["current_issue"] = None
-    session["failed_fixes"] = []
-
-# ----------------------------
-# SIMPLE FIX ENGINE (PLACEHOLDER FOR NOW)
-# ----------------------------
-def get_fixes(issue):
+def get_next_step(issue, repeat_count):
     if issue == "outlook":
-        return [
-            {"name": "safe_mode", "label": "Start Outlook Safe Mode", "confidence": "High"},
-            {"name": "restart_outlook", "label": "Restart Outlook Process", "confidence": "Medium"}
+        steps = [
+            "Check if Outlook is running in Safe Mode.",
+            "Disable add-ins and retry launch.",
+            "Rebuild Outlook profile."
+        ]
+    elif issue == "vpn":
+        steps = [
+            "Check VPN adapter status.",
+            "Flush DNS cache and retry connection.",
+            "Reinstall VPN client."
+        ]
+    elif issue == "hardware_overheating":
+        steps = [
+            "Check CPU usage and running processes.",
+            "Inspect fan operation and airflow.",
+            "Consider thermal paste or hardware issue."
+        ]
+    elif issue == "system_crash":
+        steps = [
+            "Check recent software changes or updates.",
+            "Boot into Safe Mode and test stability.",
+            "Check Event Viewer for crash logs."
+        ]
+    else:
+        steps = [
+            "Gather more details about the issue.",
+            "Check system performance and error patterns.",
+            "Run basic system diagnostics before escalation."
         ]
 
-    if issue == "hardware_overheating":
-        return [
-            {"name": "check_fans", "label": "Check Fan Operation", "confidence": "High"},
-            {"name": "close_apps", "label": "Reduce CPU Load", "confidence": "Medium"}
-        ]
+    # ESCALATION LOGIC
+    if repeat_count >= len(steps):
+        return "Escalation required: issue likely deeper system or hardware level."
 
-    return [
-        {"name": "basic_restart", "label": "Restart Device", "confidence": "High"}
-    ]
+    return steps[repeat_count]
+
+# ----------------------------
+# RESET DETECTION (INTENT SWITCH)
+# ----------------------------
+def is_new_issue(prev, new):
+    triggers = ["new issue", "actually", "different", "instead", "switching", "forget"]
+    return prev is None or any(t in new.lower() for t in triggers)
 
 # ----------------------------
 # ROUTE
@@ -89,51 +87,36 @@ def ask():
     session_id = data.get("session_id")
     message = data.get("message", "")
 
-    # ----------------------------
-    # INIT SESSION
-    # ----------------------------
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
-            "history": [],
-            "current_issue": None,
-            "last_message": None,
-            "failed_fixes": []
+            "last_issue": None,
+            "repeat_count": 0
         }
 
     session = sessions[session_id]
 
-    # ----------------------------
-    # INTENT SWITCH CHECK
-    # ----------------------------
-    switch = detect_intent_switch(session.get("last_message"), message)
-
-    if switch:
-        reset_session(session)
-        response_prefix = "🔄 New issue detected — resetting context.\n\n"
-    else:
-        response_prefix = ""
-
-    session["last_message"] = message
-    session["history"].append(message)
-
-    # ----------------------------
-    # DETECT ISSUE (ONLY FROM CURRENT MESSAGE)
-    # ----------------------------
     issue = detect_issue(message)
-    session["current_issue"] = issue
 
     # ----------------------------
-    # GENERATE FIXES
+    # INTENT SWITCH RESET
     # ----------------------------
-    fixes = get_fixes(issue)
+    if is_new_issue(session["last_issue"], message) or session["last_issue"] != issue:
+        session["repeat_count"] = 0
+        session["last_issue"] = issue
+    else:
+        session["repeat_count"] += 1
 
-    response = response_prefix + f"Detected issue: {issue}"
+    # ----------------------------
+    # GET NEXT STEP
+    # ----------------------------
+    response = get_next_step(issue, session["repeat_count"])
 
     return jsonify({
         "session_id": session_id,
         "response": response,
-        "fixes": fixes
+        "issue": issue,
+        "step": session["repeat_count"]
     })
 
 
