@@ -115,6 +115,8 @@ async function sendMessage(textOverride=null) {
 
     const data = await res.json();
 
+    console.log("FULL RESPONSE:", data); // 🔥 DEBUG
+
     addMessage("bot", data.response);
 
     chatHistory.push({
@@ -122,11 +124,7 @@ async function sendMessage(textOverride=null) {
         content: data.response
     });
 
-    console.log("OPTIONS RECEIVED:", data.options);
-
-if (Array.isArray(data.options) && data.options.length > 0) {
     renderOptions(data.options);
-}
 }
 
 function addMessage(role, text) {
@@ -141,6 +139,10 @@ function addMessage(role, text) {
 }
 
 function renderOptions(options) {
+    console.log("RENDER OPTIONS CALLED:", options); // 🔥 DEBUG
+
+    if (!options || options.length === 0) return;
+
     const chat = document.getElementById("chat");
 
     const container = document.createElement("div");
@@ -148,13 +150,16 @@ function renderOptions(options) {
 
     options.forEach(opt => {
         const btn = document.createElement("button");
-        btn.className = "option";
         btn.innerText = opt;
 
         btn.style.display = "block";
         btn.style.margin = "5px 0";
         btn.style.padding = "10px";
-        btn.style.width = "fit-content";
+        btn.style.background = "#374151";
+        btn.style.color = "white";
+        btn.style.border = "none";
+        btn.style.borderRadius = "5px";
+        btn.style.cursor = "pointer";
 
         btn.onclick = () => {
             sendMessage(opt);
