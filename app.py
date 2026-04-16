@@ -12,7 +12,6 @@ app = Flask(__name__)
 
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-change-me")
 
-# IMPORTANT: Render session stability fix
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = True
 
@@ -24,19 +23,16 @@ db = SQLAlchemy(app)
 # ----------------------------
 # OPENAI
 # ----------------------------
-client = None
-if os.getenv("OPENAI_API_KEY"):
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) if os.getenv("OPENAI_API_KEY") else None
 
 # ----------------------------
 # MODELS
 # ----------------------------
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(120), nullable=False)
+    email = db.Column(db.String(120), unique=True)
+    password = db.Column(db.String(120))
     is_admin = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Invite(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -50,106 +46,105 @@ class ChatLog(db.Model):
     response = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-class Feedback(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer)
-    message = db.Column(db.Text)
-    response = db.Column(db.Text)
-    helpful = db.Column(db.Boolean)
+# ----------------------------
+# SESSION TROUBLESHOOTING MEMORY
+# ----------------------------
+sessions = {}
+
+def get_session():
+    sid = session.get("sid")
+    if not sid:
+        sid = str(uuid.uuid4())
+        session["sid"] = sid
+        sessions[sid] = {
+            "issue": None,
+            "steps": [],
+            "history": []
+        }
+    return sessions[sid]
 
 # ----------------------------
-# HELPERS
+# ISSUE DETECTION ENGINE
+# ----------------------------
+def detect_issue(text):
+    t = text.lower()
+
+    if any(x in t for x in ["vpn", "network", "internet"]):
+        return "network"
+    if "outlook" in t or "email" in t:
+        return "outlook"
+    if "login" in t or "password" in t:
+        return "auth"
+    if "slow" in t or "crash" in t or "freeze" in t:
+        return "performance"
+
+    return "general"
+
+# ----------------------------
+# TROUBLESHOOTING TREE ENGINE
+# ----------------------------
+def next_step(issue, state):
+
+    tree = {
+        "network": [
+            "Check WiFi / Ethernet connection",
+            "Run ipconfig /flushdns",
+            "Reset network adapter",
+            "Test DNS (8.8.8.8)"
+        ],
+        "outlook": [
+            "Check Outlook is running",
+            "Restart Outlook in safe mode",
+            "Repair Office installation",
+            "Recreate Outlook profile"
+        ],
+        "auth": [
+            "Verify password",
+            "Reset cached credentials",
+            "Check AD lockout status",
+            "Reset password"
+        ],
+        "performance": [
+            "Check Task Manager CPU/RAM",
+            "Scan for malware",
+            "Check disk usage",
+            "Restart system"
+        ],
+        "general": [
+            "Restart device",
+            "Check recent changes",
+            "Run system diagnostics"
+        ]
+    }
+
+    steps = tree.get(issue, tree["general"])
+
+    done = state["steps"]
+
+    for step in steps:
+        if step not in done:
+            return step
+
+    return "Escalate to Tier 2 support"
+
+# ----------------------------
+# AUTH HELPERS
 # ----------------------------
 def current_user():
-    if "user_id" not in session:
-        return None
-    return User.query.get(session["user_id"])
+    uid = session.get("user_id")
+    return User.query.get(uid) if uid else None
 
 def is_admin():
     u = current_user()
     return u and u.is_admin
 
 # ----------------------------
-# HEALTH CHECK (FIXED MISSING ROUTE)
-# ----------------------------
-@app.route("/health")
-def health():
-    return jsonify({
-        "status": "ok",
-        "session_user": session.get("user_id")
-    })
-
-# ----------------------------
-# HOME
+# ROUTES
 # ----------------------------
 @app.route("/")
 def home():
-    if session.get("user_id"):
-        return redirect("/dashboard")
-    return render_template("index.html")
+    return render_template("index.html") if not session.get("user_id") else redirect("/dashboard")
 
-# ----------------------------
-# SIGNUP (FIXED)
-# ----------------------------
-@app.route("/signup", methods=["POST"])
-def signup():
-
-    data = request.json or {}
-
-    email = data.get("email", "").strip()
-    password = data.get("password", "").strip()
-    invite_code = data.get("invite_code", "").strip()
-
-    if not email or not password:
-        return jsonify({"error": "Missing fields"}), 400
-
-    invite = Invite.query.filter_by(code=invite_code, used=False).first()
-    if not invite:
-        return jsonify({"error": "Invalid invite code"}), 403
-
-    if User.query.filter_by(email=email).first():
-        return jsonify({"error": "User already exists"}), 400
-
-    user = User(email=email, password=password)
-    invite.used = True
-
-    db.session.add(user)
-    db.session.commit()
-
-    return jsonify({"status": "created"})
-
-# ----------------------------
-# LOGIN (FIXED SESSION BUG)
-# ----------------------------
-@app.route("/login", methods=["POST"])
-def login():
-
-    data = request.json or {}
-
-    email = data.get("email", "").strip()
-    password = data.get("password", "").strip()
-
-    user = User.query.filter_by(email=email, password=password).first()
-
-    if not user:
-        return jsonify({"error": "Invalid login"}), 401
-
-    session["user_id"] = user.id
-    session.modified = True  # IMPORTANT FIX
-
-    return jsonify({"status": "ok"})
-
-# ----------------------------
-# LOGOUT
-# ----------------------------
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect("/")
-
-# ----------------------------
-# DASHBOARD
-# ----------------------------
 @app.route("/dashboard")
 def dashboard():
     if not session.get("user_id"):
@@ -157,7 +152,37 @@ def dashboard():
     return render_template("dashboard.html")
 
 # ----------------------------
-# CHAT
+# HEALTH
+# ----------------------------
+@app.route("/health")
+def health():
+    return jsonify({
+        "status": "ok",
+        "sessions": len(sessions)
+    })
+
+# ----------------------------
+# LOGIN
+# ----------------------------
+@app.route("/login", methods=["POST"])
+def login():
+
+    data = request.json
+    user = User.query.filter_by(
+        email=data.get("email"),
+        password=data.get("password")
+    ).first()
+
+    if not user:
+        return jsonify({"error": "invalid login"}), 401
+
+    session["user_id"] = user.id
+    session.modified = True
+
+    return jsonify({"status": "ok"})
+
+# ----------------------------
+# CHAT + AI TROUBLESHOOTING v3
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
@@ -169,18 +194,23 @@ def ask():
     data = request.json
     message = data.get("message")
 
-    if client:
-        res = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[
-                {"role": "system", "content": "You are a Tier 2 IT Copilot."},
-                {"role": "user", "content": message}
-            ],
-            temperature=0.2
-        )
-        response = res.choices[0].message.content
-    else:
-        response = "AI not configured."
+    state = get_session()
+
+    issue = detect_issue(message)
+    state["issue"] = issue
+    state["history"].append(message)
+
+    step = next_step(issue, state)
+    state["steps"].append(step)
+
+    response = f"""
+🔍 Issue Type: {issue}
+
+🧠 Next Step:
+{step}
+
+👉 Try this and tell me the result (worked / failed)
+"""
 
     db.session.add(ChatLog(
         user_id=user.id,
@@ -190,48 +220,11 @@ def ask():
 
     db.session.commit()
 
-    return jsonify({"response": response})
-
-# ----------------------------
-# FEEDBACK
-# ----------------------------
-@app.route("/feedback", methods=["POST"])
-def feedback():
-
-    user = current_user()
-    if not user:
-        return jsonify({"error": "unauthorized"}), 401
-
-    data = request.json
-
-    fb = Feedback(
-        user_id=user.id,
-        message=data.get("message"),
-        response=data.get("response"),
-        helpful=data.get("helpful")
-    )
-
-    db.session.add(fb)
-    db.session.commit()
-
-    return jsonify({"status": "ok"})
-
-# ----------------------------
-# ADMIN INVITE GENERATION
-# ----------------------------
-@app.route("/admin/invite", methods=["POST"])
-def admin_invite():
-
-    if not is_admin():
-        return jsonify({"error": "forbidden"}), 403
-
-    code = str(uuid.uuid4())[:8]
-
-    invite = Invite(code=code)
-    db.session.add(invite)
-    db.session.commit()
-
-    return jsonify({"invite": code})
+    return jsonify({
+        "response": response,
+        "issue": issue,
+        "step": step
+    })
 
 # ----------------------------
 # ANALYTICS
@@ -245,26 +238,38 @@ def analytics():
     return jsonify({
         "users": User.query.count(),
         "messages": ChatLog.query.count(),
-        "feedback": Feedback.query.count(),
-        "helpful": Feedback.query.filter_by(helpful=True).count(),
-        "not_helpful": Feedback.query.filter_by(helpful=False).count()
+        "active_sessions": len(sessions)
     })
 
 # ----------------------------
-# INIT DB
+# ADMIN INVITE
+# ----------------------------
+@app.route("/admin/invite", methods=["POST"])
+def invite():
+
+    if not is_admin():
+        return "forbidden", 403
+
+    code = str(uuid.uuid4())[:8]
+
+    db.session.add(Invite(code=code))
+    db.session.commit()
+
+    return jsonify({"invite": code})
+
+# ----------------------------
+# INIT
 # ----------------------------
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
 
-        # ensure admin exists
         if not User.query.filter_by(is_admin=True).first():
-            admin = User(
+            db.session.add(User(
                 email="admin@local",
                 password="admin",
                 is_admin=True
-            )
-            db.session.add(admin)
+            ))
             db.session.commit()
 
     app.run(host="0.0.0.0", port=10000)
