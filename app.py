@@ -6,7 +6,7 @@ from openai import OpenAI
 app = Flask(__name__)
 
 # ----------------------------
-# Load API Key (Production-safe)
+# Load API Key
 # ----------------------------
 api_key = os.getenv("OPENAI_API_KEY")
 
@@ -24,6 +24,9 @@ try:
 except Exception:
     knowledge_base = []
 
+# ----------------------------
+# Smart Knowledge Matching
+# ----------------------------
 def simple_similarity(a, b):
     a_words = set(a.lower().split())
     b_words = set(b.lower().split())
@@ -46,29 +49,41 @@ def find_relevant_knowledge(user_input):
     return "\n".join([x[1] for x in scored[:3]])
 
 # ----------------------------
-# System Prompt
+# System Prompt (GUIDED MODE)
 # ----------------------------
 SYSTEM_PROMPT = """
-You are a senior enterprise IT support engineer specializing in:
+You are a senior IT troubleshooting assistant.
 
-- Windows 10/11
-- Active Directory
-- Microsoft 365 / Office
-- VPN / networking issues
-- Enterprise desktop support
+You guide users step-by-step like a decision tree.
 
-Always respond in:
+ALWAYS respond in JSON format:
 
-1. Clarifying Questions
-2. Likely Causes (ranked)
-3. Step-by-Step Troubleshooting
-4. Commands (if applicable)
-5. Escalation Conditions
+{
+  "response": "Your explanation or question",
+  "options": ["Option 1", "Option 2", "Option 3"]
+}
 
-Be concise, technical, and action-oriented.
-
-If the user answers previous clarifying questions, continue troubleshooting based on their response instead of repeating questions.
+Rules:
+- Ask ONE focused troubleshooting question at a time
+- Provide 2–4 clear answer options
+- Options should help narrow down the issue
+- If enough info is gathered, provide solution steps instead of options
+- If giving final solution, options can be empty []
+- Never return plain text — always JSON
 """
+
+# ----------------------------
+# Parse AI Response
+# ----------------------------
+def parse_ai_response(text):
+    try:
+        return json.loads(text)
+    except:
+        return {
+            "response": text,
+            "options": []
+        }
+
 # ----------------------------
 # Routes
 # ----------------------------
@@ -78,7 +93,6 @@ def home():
 
 
 @app.route("/ask", methods=["POST"])
-@app.route("/ask", methods=["POST"])
 def ask():
     try:
         data = request.json
@@ -86,11 +100,21 @@ def ask():
 
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-        # Add full conversation history
+        # Add conversation history
         for msg in history:
             messages.append({
                 "role": msg["role"],
                 "content": msg["content"]
+            })
+
+        # Add knowledge (based on last user message)
+        if history:
+            last_user = history[-1]["content"]
+            knowledge = find_relevant_knowledge(last_user)
+
+            messages.append({
+                "role": "system",
+                "content": f"Relevant internal knowledge:\n{knowledge}"
             })
 
         response = client.chat.completions.create(
@@ -99,14 +123,16 @@ def ask():
             messages=messages
         )
 
-        reply = response.choices[0].message.content
+        raw_reply = response.choices[0].message.content
+        parsed = parse_ai_response(raw_reply)
 
         usage = response.usage
         tokens = usage.total_tokens
         cost = (usage.prompt_tokens * 0.0000004) + (usage.completion_tokens * 0.0000016)
 
         return jsonify({
-            "response": reply,
+            "response": parsed.get("response"),
+            "options": parsed.get("options", []),
             "tokens": tokens,
             "cost": round(cost, 6)
         })
@@ -119,7 +145,7 @@ def ask():
 
 
 # ----------------------------
-# Run locally only
+# Run Local
 # ----------------------------
 if __name__ == "__main__":
     app.run(debug=True)
