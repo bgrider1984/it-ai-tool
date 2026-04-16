@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>IT Copilot</title>
+<title>IT Copilot SaaS</title>
 
 <style>
 body {
@@ -18,32 +18,30 @@ body {
     padding:20px;
 }
 
+.header {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+}
+
 #chat {
     height:60vh;
     overflow-y:auto;
     background:#111827;
     padding:15px;
     border-radius:10px;
-    display:flex;
-    flex-direction:column;
+    margin-top:10px;
 }
 
 .msg {
-    margin:8px 0;
+    margin:10px 0;
     padding:10px;
     border-radius:8px;
     white-space:pre-wrap;
 }
 
-.user {
-    background:#2563eb;
-    align-self:flex-end;
-}
-
-.bot {
-    background:#374151;
-    align-self:flex-start;
-}
+.user { background:#2563eb; }
+.bot { background:#374151; }
 
 .inputArea {
     display:flex;
@@ -54,8 +52,8 @@ body {
 input {
     flex:1;
     padding:10px;
-    border-radius:8px;
     border:none;
+    border-radius:8px;
 }
 
 button {
@@ -67,25 +65,11 @@ button {
     cursor:pointer;
 }
 
-/* SMART SUGGESTIONS */
-#suggestions {
-    display:flex;
-    gap:8px;
-    margin-top:10px;
-    flex-wrap:wrap;
-}
-
-.suggest {
-    background:#1f2937;
-    border:1px solid #374151;
-    padding:6px 10px;
-    border-radius:6px;
-    cursor:pointer;
-    font-size:13px;
-}
-
-.suggest:hover {
-    background:#374151;
+#keyBox {
+    width:100%;
+    padding:10px;
+    margin-bottom:10px;
+    border-radius:8px;
 }
 </style>
 </head>
@@ -93,16 +77,20 @@ button {
 <body>
 
 <div class="container">
-<h2>IT Copilot</h2>
+
+<div class="header">
+<h2>🧠 IT Copilot SaaS</h2>
+</div>
+
+<input id="apiKey" placeholder="Enter API Key (demo-key-123)" />
 
 <div id="chat"></div>
 
-<div id="suggestions"></div>
-
 <div class="inputArea">
-<input id="input" placeholder="Describe the issue..." />
+<input id="input" placeholder="Describe IT issue..." />
 <button onclick="send()">Send</button>
 </div>
+
 </div>
 
 <script>
@@ -111,106 +99,23 @@ let sessionId = localStorage.getItem("sessionId");
 
 const chat = document.getElementById("chat");
 const input = document.getElementById("input");
-const suggestions = document.getElementById("suggestions");
 
-/* ----------------------------
-   INTENT DETECTION (FAST LOCAL)
----------------------------- */
-function detectContext(text){
-
-    text = text.toLowerCase();
-
-    if(text.includes("vpn") || text.includes("network") || text.includes("wifi")){
-        return "network_vpn";
-    }
-
-    if(text.includes("outlook") || text.includes("email")){
-        return "outlook";
-    }
-
-    if(text.includes("slow") || text.includes("crash") || text.includes("freeze")){
-        return "performance";
-    }
-
-    if(text.includes("login") || text.includes("password")){
-        return "auth";
-    }
-
-    return null;
-}
-
-/* ----------------------------
-   SMART SUGGESTIONS
----------------------------- */
-function renderSuggestions(text){
-
-    const ctx = detectContext(text);
-
-    suggestions.innerHTML = "";
-
-    if(!ctx) return;
-
-    const map = {
-        network_vpn: [
-            { label:"Reset VPN", action:"vpn reset" },
-            { label:"Flush DNS", action:"flush dns" },
-            { label:"Network Repair", action:"network repair" }
-        ],
-        outlook: [
-            { label:"Safe Mode Start", action:"outlook safe mode" },
-            { label:"Repair Profile", action:"repair outlook profile" },
-            { label:"Reset Cache", action:"reset outlook cache" }
-        ],
-        performance: [
-            { label:"Check Task Manager", action:"high cpu check" },
-            { label:"Disable Startup Apps", action:"startup cleanup" },
-            { label:"Check Disk Health", action:"disk check" }
-        ],
-        auth: [
-            { label:"Reset Password", action:"password reset flow" },
-            { label:"Clear Credentials", action:"clear cached login" }
-        ]
-    };
-
-    (map[ctx] || []).forEach(item => {
-
-        const b = document.createElement("div");
-        b.className = "suggest";
-        b.textContent = item.label;
-
-        b.onclick = () => {
-            input.value = item.action;
-            send(ctx); // send with context
-        };
-
-        suggestions.appendChild(b);
-    });
-}
-
-/* ----------------------------
-   CHAT UI
----------------------------- */
 function add(text, cls){
     const div = document.createElement("div");
     div.className = "msg " + cls;
     div.textContent = text;
     chat.appendChild(div);
-    chat.scrollTop = chat.scrollHeight;
 }
 
-/* ----------------------------
-   SEND
----------------------------- */
-async function send(contextOverride=null){
+async function send(){
 
     const msg = input.value.trim();
     if(!msg) return;
 
-    const context = contextOverride || detectContext(msg);
-
     add(msg, "user");
     input.value = "";
-    suggestions.innerHTML = "";
+
+    const apiKey = document.getElementById("apiKey").value;
 
     const res = await fetch("/ask", {
         method:"POST",
@@ -218,28 +123,22 @@ async function send(contextOverride=null){
         body:JSON.stringify({
             message: msg,
             session_id: sessionId,
-            context: context
+            api_key: apiKey
         })
     });
 
     const data = await res.json();
+
+    if(data.error){
+        add("❌ " + data.error, "bot");
+        return;
+    }
 
     sessionId = data.session_id;
     localStorage.setItem("sessionId", sessionId);
 
     add(data.response, "bot");
 }
-
-/* ----------------------------
-   LIVE INPUT LISTENER
----------------------------- */
-input.addEventListener("input", () => {
-    renderSuggestions(input.value);
-});
-
-input.addEventListener("keydown", e => {
-    if(e.key === "Enter") send();
-});
 
 </script>
 
