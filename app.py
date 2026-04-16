@@ -1,81 +1,77 @@
 import os
 import uuid
-import time
-from flask import Flask, render_template, request, jsonify
+import stripe
+import bcrypt
+from flask import Flask, request, jsonify, render_template
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
+from dotenv import load_dotenv
 from openai import OpenAI
 
+load_dotenv()
+
 app = Flask(__name__)
+
+# ----------------------------
+# CONFIG
+# ----------------------------
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+db = SQLAlchemy(app)
+
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ----------------------------
-# SAAS USERS (replace later with DB)
-# ----------------------------
-USERS = {
-    "demo-key-123": {
-        "name": "Demo User",
-        "plan": "free",
-        "requests": []
-    }
-}
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID")
 
 # ----------------------------
-# SESSIONS
+# DATABASE MODELS
 # ----------------------------
-SESSIONS = {}
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password = db.Column(db.LargeBinary, nullable=False)
+    plan = db.Column(db.String(20), default="free")
+    stripe_customer_id = db.Column(db.String(120))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Usage(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Session(db.Model):
+    id = db.Column(db.String(120), primary_key=True)
+    user_id = db.Column(db.Integer)
+    history = db.Column(db.Text)
 
 # ----------------------------
-# RATE LIMIT CONFIG
+# HELPERS
 # ----------------------------
-LIMIT_PER_MINUTE = 30
+def hash_password(password):
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt())
 
-def rate_limit(user):
-    now = time.time()
-    window = 60
+def check_password(password, hashed):
+    return bcrypt.checkpw(password.encode(), hashed)
 
-    user["requests"] = [t for t in user["requests"] if now - t < window]
-
-    if len(user["requests"]) >= LIMIT_PER_MINUTE:
-        return False
-
-    user["requests"].append(now)
-    return True
+def get_user_by_token(token):
+    return User.query.filter_by(id=token).first()
 
 # ----------------------------
-# GET USER
-# ----------------------------
-def get_user(api_key):
-    return USERS.get(api_key)
-
-# ----------------------------
-# SESSION
-# ----------------------------
-def get_session(session_id):
-    if not session_id or session_id not in SESSIONS:
-        session_id = str(uuid.uuid4())
-        SESSIONS[session_id] = {
-            "history": []
-        }
-    return session_id, SESSIONS[session_id]
-
-# ----------------------------
-# CORE AI ENGINE
+# AI ENGINE
 # ----------------------------
 def generate_response(message, history):
 
     prompt = f"""
-You are a FAST Tier 2 IT Copilot for junior technicians.
+You are a Tier 2 IT Help Desk Copilot.
 
-Rules:
-- Be extremely concise
-- First give MOST likely fix
-- Then 2-4 backup steps
-- No fluff
+Be concise and practical.
 
 Format:
-
-🔴 Most likely fix:
-🟡 If that doesn't work:
-🔵 If still broken:
+🔴 Fix first:
+🟡 Next steps:
+🔵 Escalation:
 
 Issue:
 {message}
@@ -84,14 +80,14 @@ History:
 {history}
 """
 
-    response = client.chat.completions.create(
+    res = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
         max_tokens=500
     )
 
-    return response.choices[0].message.content
+    return res.choices[0].message.content
 
 # ----------------------------
 # ROUTES
@@ -100,53 +96,132 @@ History:
 def home():
     return render_template("index.html")
 
+# ----------------------------
+# SIGNUP
+# ----------------------------
+@app.route("/signup", methods=["POST"])
+def signup():
+
+    data = request.json
+    email = data["email"]
+    password = hash_password(data["password"])
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({"error": "User exists"}), 400
+
+    user = User(email=email, password=password)
+    db.session.add(user)
+    db.session.commit()
+
+    return jsonify({"message": "User created"})
+
+# ----------------------------
+# LOGIN
+# ----------------------------
+@app.route("/login", methods=["POST"])
+def login():
+
+    data = request.json
+    user = User.query.filter_by(email=data["email"]).first()
+
+    if not user or not check_password(data["password"], user.password):
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    return jsonify({"user_id": user.id, "plan": user.plan})
+
+# ----------------------------
+# STRIPE CHECKOUT
+# ----------------------------
+@app.route("/create-checkout", methods=["POST"])
+def create_checkout():
+
+    data = request.json
+    user = User.query.get(data["user_id"])
+
+    session = stripe.checkout.Session.create(
+        payment_method_types=["card"],
+        mode="subscription",
+        line_items=[{
+            "price": STRIPE_PRICE_ID,
+            "quantity": 1
+        }],
+        success_url="https://yourdomain.com/success",
+        cancel_url="https://yourdomain.com/cancel",
+        customer_email=user.email
+    )
+
+    return jsonify({"url": session.url})
+
+# ----------------------------
+# STRIPE WEBHOOK
+# ----------------------------
+@app.route("/stripe-webhook", methods=["POST"])
+def stripe_webhook():
+
+    payload = request.data
+    event = stripe.Event.construct_from(
+        request.json, stripe.api_key
+    )
+
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        email = session["customer_email"]
+
+        user = User.query.filter_by(email=email).first()
+        if user:
+            user.plan = "pro"
+            db.session.commit()
+
+    return jsonify({"status": "ok"})
+
+# ----------------------------
+# MAIN AI REQUEST
+# ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
 
     data = request.json
 
-    api_key = data.get("api_key")
+    user_id = data.get("user_id")
     message = data.get("message", "")
     session_id = data.get("session_id")
 
-    user = get_user(api_key)
+    user = User.query.get(user_id)
 
     if not user:
-        return jsonify({"error": "Invalid API key"}), 403
+        return jsonify({"error": "Invalid user"}), 403
 
-    if not rate_limit(user):
-        return jsonify({"error": "Rate limit exceeded"}), 429
+    # usage tracking
+    usage = Usage(user_id=user.id)
+    db.session.add(usage)
+    db.session.commit()
 
-    session_id, session = get_session(session_id)
+    # simple free tier limit
+    if user.plan == "free":
+        count = Usage.query.filter_by(user_id=user.id).count()
+        if count > 50:
+            return jsonify({"error": "Upgrade to Pro"}), 403
 
-    session["history"].append(message)
+    session = Session.query.get(session_id)
 
-    response = generate_response(message, session["history"])
+    if not session:
+        session_id = str(uuid.uuid4())
+        session = Session(id=session_id, user_id=user.id, history="")
+
+    session.history += f"\n{message}"
+    db.session.add(session)
+    db.session.commit()
+
+    response = generate_response(message, session.history)
 
     return jsonify({
         "session_id": session_id,
         "response": response,
-        "plan": user["plan"]
-    })
-
-
-# ----------------------------
-# SIMPLE USAGE STATS (FOR SAAS)
-# ----------------------------
-@app.route("/stats", methods=["POST"])
-def stats():
-
-    api_key = request.json.get("api_key")
-    user = get_user(api_key)
-
-    if not user:
-        return jsonify({"error": "invalid"}), 403
-
-    return jsonify({
-        "requests_used": len(user["requests"]),
-        "plan": user["plan"]
+        "plan": user.plan
     })
 
 
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)
