@@ -11,19 +11,19 @@ app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = True
 
-app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///local.db")
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+    "DATABASE_URL",
+    "sqlite:///local.db"
+)
+
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
 
 # ----------------------------
-# USERS (BETA SIMPLE)
+# USERS (BETA)
 # ----------------------------
-USERS = {
-    "admin@local": {"password": "admin", "is_admin": True}
-}
-
-INVITES = set()
+USERS = {"admin@local": {"password": "admin", "is_admin": True}}
 SESSION_INDEX = {}
 
 # ----------------------------
@@ -38,51 +38,27 @@ class ChatHistory(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 # ----------------------------
-# SESSION MEMORY
+# SAFE SESSION
 # ----------------------------
-sessions = {}
-
-def get_session():
-    sid = session.get("sid")
-
-    if not sid:
-        sid = str(uuid.uuid4())
-        session["sid"] = sid
-        sessions[sid] = {"history": []}
-
-    return sid
+def get_session_id():
+    if "sid" not in session:
+        session["sid"] = str(uuid.uuid4())
+    return session["sid"]
 
 # ----------------------------
-# INTENT CLASSIFIER (NEW CORE LOGIC)
+# INTENT CLASSIFIER
 # ----------------------------
-def classify_intent(message):
-    t = message.lower()
+def classify_intent(msg):
+    t = msg.lower()
 
-    vague_keywords = [
-        "won't open",
-        "not working",
-        "doesn't work",
-        "broken",
-        "issue",
-        "problem",
-        "won’t start",
-        "cannot open"
-    ]
+    vague = ["won't", "not working", "won’t", "doesn't", "broken", "issue"]
+    specific = ["error", "crash", "blue screen", "vpn", "outlook"]
 
-    specific_keywords = [
-        "error code",
-        "blue screen",
-        "crash dump",
-        "vpn error",
-        "outlook error",
-        "exception"
-    ]
-
-    if any(k in t for k in vague_keywords):
+    if any(v in t for v in vague):
         return "clarify"
 
-    if any(k in t for k in specific_keywords):
-        return "direct_fix"
+    if any(s in t for s in specific):
+        return "direct"
 
     return "clarify"
 
@@ -99,9 +75,6 @@ def dashboard():
         return redirect("/")
     return render_template("dashboard.html")
 
-# ----------------------------
-# LOGIN
-# ----------------------------
 @app.route("/login", methods=["POST"])
 def login():
     data = request.json
@@ -111,95 +84,100 @@ def login():
     if not user or user["password"] != data.get("password"):
         return jsonify({"error": "invalid login"}), 401
 
-    session["user"] = data.get("email")
-    session.modified = True
-
+    session["user"] = data["email"]
     return jsonify({"status": "ok"})
 
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/")
+
 # ----------------------------
-# ASK (FIXED LOGIC — NO BAD FALLBACKS)
+# ASK (CRASH-PROOF VERSION)
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
 
-    if not session.get("user"):
-        return jsonify({"error": "unauthorized"}), 401
+    try:
+        if not session.get("user"):
+            return jsonify({"error": "unauthorized"}), 401
 
-    data = request.json
-    message = data.get("message", "")
+        data = request.json or {}
+        message = data.get("message", "")
 
-    sid = get_session()
+        sid = get_session_id()
 
-    # save session index
-    if sid not in SESSION_INDEX:
-        SESSION_INDEX[sid] = {
-            "title": message[:30],
-            "created": str(datetime.utcnow())
-        }
+        # ensure session index exists
+        if sid not in SESSION_INDEX:
+            SESSION_INDEX[sid] = {
+                "title": message[:30] if message else "New Session",
+                "created": str(datetime.utcnow())
+            }
 
-    intent = classify_intent(message)
+        intent = classify_intent(message)
 
-    # ----------------------------
-    # CRITICAL FIX: PROPER FLOW CONTROL
-    # ----------------------------
-    if intent == "clarify":
-        reply = (
-            "Before I suggest fixes, I need a bit more detail:\n\n"
-            "1. Is this happening to ALL applications or just one?\n"
-            "2. Did this start after a restart or update?\n"
-            "3. Can you open Task Manager (Ctrl + Shift + Esc)?"
-        )
-
-    else:
-        msg = message.lower()
-
-        if "vpn" in msg:
-            reply = "Step 1: Reconnect VPN client → Step 2: Verify internet access"
-        elif "outlook" in msg:
-            reply = "Step 1: Restart Outlook → Step 2: Safe Mode test"
-        elif "crash" in msg:
-            reply = "Step 1: Check CPU/RAM usage in Task Manager"
-        elif "slow" in msg:
-            reply = "Step 1: Check disk usage → Step 2: Disable background apps"
+        if intent == "clarify":
+            reply = (
+                "I need a bit more detail:\n"
+                "1. Is this affecting all apps or one?\n"
+                "2. Did this start recently or after changes?\n"
+                "3. Any error messages?"
+            )
         else:
-            reply = "Start with a system restart, then re-test the issue."
+            m = message.lower()
 
-    # SAVE CHAT
-    db.session.add(ChatHistory(
-        user=session["user"],
-        role="user",
-        message=message,
-        session_id=sid
-    ))
+            if "vpn" in m:
+                reply = "Reconnect VPN → verify internet"
+            elif "outlook" in m:
+                reply = "Restart Outlook → Safe Mode test"
+            elif "crash" in m:
+                reply = "Check Task Manager → CPU/RAM usage"
+            else:
+                reply = "Restart device → re-test issue"
 
-    db.session.add(ChatHistory(
-        user=session["user"],
-        role="assistant",
-        message=reply,
-        session_id=sid
-    ))
+        # SAFE DB WRITE (prevents 500 crash)
+        try:
+            db.session.add(ChatHistory(
+                user=session["user"],
+                role="user",
+                message=message,
+                session_id=sid
+            ))
 
-    db.session.commit()
+            db.session.add(ChatHistory(
+                user=session["user"],
+                role="assistant",
+                message=reply,
+                session_id=sid
+            ))
 
-    return jsonify({
-        "response": reply,
-        "session_id": sid
-    })
+            db.session.commit()
+
+        except Exception as db_error:
+            print("DB ERROR:", db_error)
+            db.session.rollback()
+
+        return jsonify({
+            "response": reply,
+            "session_id": sid
+        })
+
+    except Exception as e:
+        print("ASK ERROR:", e)
+        return jsonify({"error": "internal server error"}), 500
 
 # ----------------------------
-# SESSION LIST
+# SESSIONS
 # ----------------------------
 @app.route("/sessions")
 def sessions_list():
-
     if not session.get("user"):
         return jsonify({"error": "unauthorized"}), 401
 
     return jsonify([
         {
             "session_id": sid,
-            "title": data["title"],
-            "created": data["created"]
+            "title": data["title"]
         }
         for sid, data in SESSION_INDEX.items()
     ])
@@ -230,8 +208,7 @@ def health():
     return jsonify({
         "status": "ok",
         "users": len(USERS),
-        "sessions": len(SESSION_INDEX),
-        "history_rows": ChatHistory.query.count()
+        "sessions": len(SESSION_INDEX)
     })
 
 # ----------------------------
