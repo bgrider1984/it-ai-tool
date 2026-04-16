@@ -10,63 +10,51 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 sessions = {}
 
 # ----------------------------
-# SESSION
+# SESSION INIT
 # ----------------------------
 def get_session(session_id):
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
-            "history": [],
-            "issue": None,
-            "step_index": 0
+            "steps": [],
+            "current_index": 0,
+            "step_results": {},
+            "history": []
         }
     return session_id, sessions[session_id]
 
 # ----------------------------
-# INTENT SWITCH
+# AI ENGINE (STRUCTURED STEPS)
 # ----------------------------
-def is_new_issue(prev, msg):
-    triggers = ["new issue", "actually", "different", "instead", "switch", "forget"]
-    if prev is None:
-        return True
-    return any(t in msg.lower() for t in triggers)
-
-# ----------------------------
-# TIER 2 ACTIONABLE ENGINE
-# ----------------------------
-def ai_engine(issue, history):
+def generate_plan(message, history):
 
     prompt = f"""
-You are a Tier 2 IT engineer.
+You are a Tier 2 IT troubleshooting engineer.
 
-Convert troubleshooting into ACTIONABLE steps.
+Create an EXECUTABLE troubleshooting plan.
 
-RULES:
-- Every step MUST include instructions (click-by-click or command-by-command)
-- Never give vague steps
-- Always include expected result
-- Always include next escalation path if step fails
-- Choose a START HERE step
+Rules:
+- Steps must be actionable
+- Each step must be independent
+- Include clear instructions
+- Order from easiest → hardest fix
 
 Return ONLY JSON:
 
 {{
-  "issue_summary": "...",
-  "likely_cause": "...",
-  "confidence": "low|medium|high",
-  "start_here": 0,
+  "issue": "short description",
   "steps": [
     {{
-      "title": "Step name",
-      "instructions": ["step 1", "step 2", "step 3"],
-      "expected": "what should happen",
-      "if_failed": "next diagnostic direction"
+      "id": "unique_step_id",
+      "title": "step name",
+      "instructions": "exact actions user performs",
+      "expected": "what should happen"
     }}
   ]
 }}
 
 Issue:
-{issue}
+{message}
 
 History:
 {history}
@@ -76,16 +64,36 @@ History:
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
-        max_tokens=800
+        max_tokens=700
     )
 
-    try:
-        return response.choices[0].message.content
-    except:
-        return None
+    return response.choices[0].message.content
 
 # ----------------------------
-# ROUTE
+# STEP EVALUATION ENGINE
+# ----------------------------
+def evaluate_next_step(session):
+
+    steps = session["steps"]
+    idx = session["current_index"]
+
+    # skip completed steps
+    while idx < len(steps):
+        step_id = steps[idx]["id"]
+        if session["step_results"].get(step_id) == "failed":
+            idx += 1
+            continue
+        break
+
+    session["current_index"] = idx
+
+    if idx >= len(steps):
+        return None
+
+    return steps[idx]
+
+# ----------------------------
+# ROUTES
 # ----------------------------
 @app.route("/")
 def home():
@@ -95,32 +103,59 @@ def home():
 def ask():
 
     data = request.json
-
     session_id = data.get("session_id")
     message = data.get("message", "")
 
     session_id, session = get_session(session_id)
 
-    # ----------------------------
-    # DETECT ISSUE
-    # ----------------------------
-    issue = message  # keep raw context for AI
-
-    if is_new_issue(session["issue"], message):
-        session["step_index"] = 0
-        session["history"] = []
-
     session["history"].append(message)
-    session["issue"] = issue
 
-    # ----------------------------
-    # AI CALL
-    # ----------------------------
-    raw = ai_engine(issue, session["history"])
+    raw = generate_plan(message, session["history"])
+
+    try:
+        plan = eval(raw.replace("null", "None"))
+    except:
+        plan = {"issue": "error", "steps": []}
+
+    session["steps"] = plan.get("steps", [])
+    session["current_index"] = 0
+    session["step_results"] = {}
+
+    next_step = evaluate_next_step(session)
 
     return jsonify({
         "session_id": session_id,
-        "response": raw
+        "issue": plan.get("issue"),
+        "step": next_step,
+        "all_steps": session["steps"]
+    })
+
+
+# ----------------------------
+# STEP FEEDBACK ENDPOINT
+# ----------------------------
+@app.route("/step", methods=["POST"])
+def step_feedback():
+
+    data = request.json
+    session_id = data.get("session_id")
+    step_id = data.get("step_id")
+    result = data.get("result")  # passed / failed
+
+    session = sessions.get(session_id)
+
+    if not session:
+        return jsonify({"error": "no session"}), 400
+
+    session["step_results"][step_id] = result
+
+    if result == "passed":
+        session["current_index"] += 1
+
+    next_step = evaluate_next_step(session)
+
+    return jsonify({
+        "next_step": next_step
     })
 
 
