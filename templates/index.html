@@ -6,99 +6,81 @@
 
 <style>
 body {
-    margin: 0;
-    font-family: Arial, sans-serif;
-    background: #0b1220;
-    color: white;
+    margin:0;
+    font-family:Arial;
+    background:#0b1220;
+    color:white;
 }
 
 .container {
-    max-width: 900px;
-    margin: auto;
-    padding: 20px;
+    max-width:900px;
+    margin:auto;
+    padding:20px;
 }
 
-h2 {
-    text-align: center;
-}
-
-/* CHAT WINDOW */
 #chat {
-    height: 70vh;
-    overflow-y: auto;
-    background: #111827;
-    padding: 15px;
-    border-radius: 10px;
-    display: flex;
-    flex-direction: column;
+    height:70vh;
+    overflow-y:auto;
+    background:#111827;
+    padding:15px;
+    border-radius:10px;
+    display:flex;
+    flex-direction:column;
 }
 
-/* MESSAGE BUBBLES */
 .msg {
-    margin: 6px 0;
-    padding: 10px;
-    border-radius: 10px;
-    max-width: 75%;
-    white-space: pre-wrap;
+    margin:6px 0;
+    padding:10px;
+    border-radius:10px;
+    max-width:75%;
+    white-space:pre-wrap;
 }
 
-.user {
-    background: #2563eb;
-    align-self: flex-end;
-}
+.user { background:#2563eb; align-self:flex-end; }
+.bot { background:#374151; align-self:flex-start; }
 
-.bot {
-    background: #374151;
-    align-self: flex-start;
-}
-
-/* FIX BUTTONS */
 .fix-btn {
-    margin-top: 8px;
-    margin-right: 6px;
-    padding: 6px 10px;
-    border-radius: 6px;
-    border: none;
-    cursor: pointer;
-    font-size: 12px;
+    margin-top:8px;
+    margin-right:6px;
+    padding:6px 10px;
+    border:none;
+    border-radius:6px;
+    cursor:pointer;
 }
 
-.high {
-    background: #22c55e;
-    color: black;
+.high { background:#22c55e; }
+.medium { background:#eab308; }
+.low { background:#ef4444; }
+
+.feedback-btn {
+    margin-top:8px;
+    margin-right:6px;
+    padding:6px 10px;
+    border:none;
+    border-radius:6px;
+    cursor:pointer;
+    background:#3b82f6;
+    color:white;
 }
 
-.medium {
-    background: #eab308;
-    color: black;
-}
-
-.low {
-    background: #ef4444;
-    color: white;
-}
-
-/* INPUT AREA */
 .inputArea {
-    display: flex;
-    gap: 10px;
-    margin-top: 10px;
+    display:flex;
+    gap:10px;
+    margin-top:10px;
 }
 
 input {
-    flex: 1;
-    padding: 12px;
-    border-radius: 8px;
-    border: none;
-    outline: none;
+    flex:1;
+    padding:10px;
+    border-radius:8px;
+    border:none;
 }
 
 button.send {
-    padding: 12px 16px;
-    background: #22c55e;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
+    padding:10px 16px;
+    background:#22c55e;
+    border:none;
+    border-radius:8px;
 }
 </style>
 </head>
@@ -106,88 +88,110 @@ button.send {
 <body>
 
 <div class="container">
-    <h2>IT Copilot</h2>
 
-    <div id="chat"></div>
+<h2>IT Copilot</h2>
 
-    <div class="inputArea">
-        <input id="input" placeholder="Describe your IT issue..." />
-        <button class="send" onclick="send()">Send</button>
-    </div>
+<div id="chat"></div>
+
+<div class="inputArea">
+    <input id="input" placeholder="Describe issue..." />
+    <button class="send" onclick="send()">Send</button>
+</div>
+
 </div>
 
 <script>
 
 let sessionId = localStorage.getItem("sessionId");
+let currentFix = null;
 
 const chat = document.getElementById("chat");
 const input = document.getElementById("input");
 
-/* ENTER KEY SUPPORT */
-input.addEventListener("keydown", function(e){
-    if(e.key === "Enter"){
-        e.preventDefault();
-        send();
-    }
+input.addEventListener("keydown", e => {
+    if(e.key === "Enter") send();
 });
 
-/* ADD MESSAGE */
-function add(text, type, fixes = []){
+function add(text, type, fixes=[], askFeedback=false, fixName=null){
     const div = document.createElement("div");
     div.className = "msg " + type;
 
-    const textNode = document.createElement("div");
-    textNode.textContent = text;
-    div.appendChild(textNode);
+    div.textContent = text;
 
-    /* FIX BUTTONS */
     fixes.forEach(fix => {
         const btn = document.createElement("button");
-
-        btn.className = "fix-btn " + (fix.confidence || "medium").toLowerCase();
+        btn.className = "fix-btn " + fix.confidence.toLowerCase();
         btn.textContent = `${fix.label} (${fix.confidence})`;
-
         btn.onclick = () => runFix(fix.name);
-
+        div.appendChild(document.createElement("br"));
         div.appendChild(btn);
     });
+
+    if(askFeedback && fixName){
+        const yes = document.createElement("button");
+        yes.className = "feedback-btn";
+        yes.textContent = "👍 Worked";
+        yes.onclick = () => sendFeedback(fixName, "yes");
+
+        const no = document.createElement("button");
+        no.className = "feedback-btn";
+        no.textContent = "👎 Didn't work";
+        no.onclick = () => sendFeedback(fixName, "no");
+
+        div.appendChild(document.createElement("br"));
+        div.appendChild(yes);
+        div.appendChild(no);
+    }
 
     chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
 }
 
-/* RUN FIX → SHOW INSTRUCTIONS */
-async function runFix(fixName){
-
-    add("Opening steps for: " + fixName, "user");
+async function runFix(fix){
+    currentFix = fix;
 
     const res = await fetch("/ask", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-            run_fix: fixName,
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+            run_fix: fix,
             session_id: sessionId
         })
     });
 
     const data = await res.json();
 
-    add(data.response, "bot");
+    add(data.response, "bot", [], data.ask_feedback, data.current_fix);
 }
 
-/* SEND MESSAGE */
+async function sendFeedback(fix, result){
+
+    const res = await fetch("/ask", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+            feedback: {fix, result},
+            session_id: sessionId
+        })
+    });
+
+    const data = await res.json();
+
+    add(data.response, "bot", data.fixes || []);
+}
+
 async function send(){
 
     const msg = input.value.trim();
     if(!msg) return;
 
-    add(msg, "user");
+    add(msg,"user");
     input.value = "";
 
     const res = await fetch("/ask", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
             message: msg,
             session_id: sessionId
         })
