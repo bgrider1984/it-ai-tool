@@ -17,13 +17,14 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
 # ----------------------------
-# USERS / INVITES (BETA SIMPLE)
+# USERS (BETA SIMPLE)
 # ----------------------------
 USERS = {
     "admin@local": {"password": "admin", "is_admin": True}
 }
 
 INVITES = set()
+SESSION_INDEX = {}
 
 # ----------------------------
 # CHAT HISTORY MODEL
@@ -37,28 +38,9 @@ class ChatHistory(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 # ----------------------------
-# SESSION MEMORY (IN-MEMORY INDEX)
+# SESSION MEMORY
 # ----------------------------
-SESSION_INDEX = {}
-
 sessions = {}
-
-# ----------------------------
-# HELPERS
-# ----------------------------
-def get_session_title(message):
-    t = message.lower()
-    if "vpn" in t:
-        return "VPN Issue"
-    if "outlook" in t:
-        return "Outlook Issue"
-    if "login" in t:
-        return "Login Issue"
-    if "crash" in t:
-        return "System Crash"
-    if "slow" in t:
-        return "Performance Issue"
-    return "General IT Issue"
 
 def get_session():
     sid = session.get("sid")
@@ -66,9 +48,43 @@ def get_session():
     if not sid:
         sid = str(uuid.uuid4())
         session["sid"] = sid
-        sessions[sid] = {"step": 0, "history": []}
+        sessions[sid] = {"history": []}
 
     return sid
+
+# ----------------------------
+# INTENT CLASSIFIER (NEW CORE LOGIC)
+# ----------------------------
+def classify_intent(message):
+    t = message.lower()
+
+    vague_keywords = [
+        "won't open",
+        "not working",
+        "doesn't work",
+        "broken",
+        "issue",
+        "problem",
+        "won’t start",
+        "cannot open"
+    ]
+
+    specific_keywords = [
+        "error code",
+        "blue screen",
+        "crash dump",
+        "vpn error",
+        "outlook error",
+        "exception"
+    ]
+
+    if any(k in t for k in vague_keywords):
+        return "clarify"
+
+    if any(k in t for k in specific_keywords):
+        return "direct_fix"
+
+    return "clarify"
 
 # ----------------------------
 # ROUTES
@@ -84,7 +100,7 @@ def dashboard():
     return render_template("dashboard.html")
 
 # ----------------------------
-# LOGIN (BETA SIMPLE)
+# LOGIN
 # ----------------------------
 @app.route("/login", methods=["POST"])
 def login():
@@ -101,7 +117,7 @@ def login():
     return jsonify({"status": "ok"})
 
 # ----------------------------
-# ASK (COPILOT RESPONSE + HISTORY SAVE)
+# ASK (FIXED LOGIC — NO BAD FALLBACKS)
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
@@ -114,28 +130,41 @@ def ask():
 
     sid = get_session()
 
-    # create session index entry if new
+    # save session index
     if sid not in SESSION_INDEX:
         SESSION_INDEX[sid] = {
-            "title": get_session_title(message),
+            "title": message[:30],
             "created": str(datetime.utcnow())
         }
 
-    # simple AI logic (beta)
-    msg = message.lower()
+    intent = classify_intent(message)
 
-    if "vpn" in msg:
-        reply = "Check VPN connection → reconnect client."
-    elif "outlook" in msg:
-        reply = "Restart Outlook → try Safe Mode."
-    elif "crash" in msg:
-        reply = "Check Task Manager → CPU/RAM usage."
-    elif "slow" in msg:
-        reply = "Check disk usage and background processes."
+    # ----------------------------
+    # CRITICAL FIX: PROPER FLOW CONTROL
+    # ----------------------------
+    if intent == "clarify":
+        reply = (
+            "Before I suggest fixes, I need a bit more detail:\n\n"
+            "1. Is this happening to ALL applications or just one?\n"
+            "2. Did this start after a restart or update?\n"
+            "3. Can you open Task Manager (Ctrl + Shift + Esc)?"
+        )
+
     else:
-        reply = "Restart device and re-test issue."
+        msg = message.lower()
 
-    # SAVE USER MESSAGE
+        if "vpn" in msg:
+            reply = "Step 1: Reconnect VPN client → Step 2: Verify internet access"
+        elif "outlook" in msg:
+            reply = "Step 1: Restart Outlook → Step 2: Safe Mode test"
+        elif "crash" in msg:
+            reply = "Step 1: Check CPU/RAM usage in Task Manager"
+        elif "slow" in msg:
+            reply = "Step 1: Check disk usage → Step 2: Disable background apps"
+        else:
+            reply = "Start with a system restart, then re-test the issue."
+
+    # SAVE CHAT
     db.session.add(ChatHistory(
         user=session["user"],
         role="user",
@@ -143,7 +172,6 @@ def ask():
         session_id=sid
     ))
 
-    # SAVE ASSISTANT MESSAGE
     db.session.add(ChatHistory(
         user=session["user"],
         role="assistant",
@@ -159,7 +187,7 @@ def ask():
     })
 
 # ----------------------------
-# LIST SESSIONS (SIDEBAR)
+# SESSION LIST
 # ----------------------------
 @app.route("/sessions")
 def sessions_list():
@@ -177,7 +205,7 @@ def sessions_list():
     ])
 
 # ----------------------------
-# LOAD SESSION HISTORY
+# LOAD SESSION
 # ----------------------------
 @app.route("/load_session/<sid>")
 def load_session(sid):
@@ -190,10 +218,7 @@ def load_session(sid):
     ).order_by(ChatHistory.timestamp.asc()).all()
 
     return jsonify([
-        {
-            "role": c.role,
-            "message": c.message
-        }
+        {"role": c.role, "message": c.message}
         for c in chats
     ])
 
