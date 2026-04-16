@@ -2,3 +2,4 @@ flask
 openai
 gunicorn
 stripe==10.12.0
+bcrypt
