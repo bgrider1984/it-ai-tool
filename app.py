@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 load_dotenv()
+print("KEY LOADED:", os.getenv("OPENAI_API_KEY"))
 
 from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
