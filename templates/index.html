@@ -1,40 +1,50 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <title>IT Copilot</title>
+    <meta charset="UTF-8">
+    <title>IT Coach</title>
 
     <style>
         body {
             font-family: Arial, sans-serif;
+            margin: 0;
             background: #0f172a;
             color: white;
-            margin: 0;
-            padding: 0;
         }
 
         .container {
-            max-width: 800px;
+            max-width: 900px;
             margin: 0 auto;
             padding: 20px;
         }
 
         h1 {
             text-align: center;
+            margin-bottom: 10px;
+        }
+
+        #statusBar {
+            display: flex;
+            justify-content: space-between;
+            background: #1f2937;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            font-size: 14px;
         }
 
         #chatBox {
             background: #111827;
-            padding: 15px;
-            border-radius: 10px;
             height: 70vh;
             overflow-y: auto;
+            padding: 15px;
+            border-radius: 10px;
             margin-bottom: 10px;
         }
 
-        .message {
-            margin: 10px 0;
+        .msg {
             padding: 10px;
+            margin: 8px 0;
             border-radius: 8px;
             white-space: pre-wrap;
         }
@@ -56,18 +66,17 @@
 
         input {
             flex: 1;
-            padding: 10px;
+            padding: 12px;
             border-radius: 8px;
             border: none;
             font-size: 16px;
         }
 
         button {
-            padding: 10px 15px;
+            padding: 12px 18px;
             border: none;
             border-radius: 8px;
             background: #22c55e;
-            color: black;
             font-weight: bold;
             cursor: pointer;
         }
@@ -76,54 +85,62 @@
             background: #16a34a;
         }
 
-        .typing {
-            font-style: italic;
-            opacity: 0.7;
+        .small {
+            opacity: 0.8;
+            font-size: 12px;
         }
     </style>
 </head>
 
 <body>
-<div class="container">
-    <h1>IT Copilot</h1>
 
+<div class="container">
+    <h1>IT Coaching Assistant</h1>
+
+    <!-- STATUS BAR -->
+    <div id="statusBar">
+        <div>Skill: <span id="skill">Beginner</span></div>
+        <div>Score: <span id="score">0</span></div>
+        <div>Confused: <span id="confused">No</span></div>
+    </div>
+
+    <!-- CHAT -->
     <div id="chatBox"></div>
 
+    <!-- INPUT -->
     <div class="inputArea">
-        <input id="messageInput" type="text" placeholder="Type your issue..." />
-        <button id="sendButton">Send</button>
+        <input id="input" type="text" placeholder="Describe your issue..." />
+        <button onclick="sendMessage()">Send</button>
     </div>
 </div>
 
 <script>
+
 let sessionId = null;
 
 const chatBox = document.getElementById("chatBox");
-const input = document.getElementById("messageInput");
-const sendButton = document.getElementById("sendButton");
+const input = document.getElementById("input");
+
+const skillEl = document.getElementById("skill");
+const scoreEl = document.getElementById("score");
+const confusedEl = document.getElementById("confused");
 
 // ----------------------------
 // ENTER KEY SUPPORT
 // ----------------------------
-input.addEventListener("keypress", function (event) {
-    if (event.key === "Enter") {
-        event.preventDefault();
+input.addEventListener("keypress", function(e) {
+    if (e.key === "Enter") {
+        e.preventDefault();
         sendMessage();
     }
 });
 
 // ----------------------------
-// SEND BUTTON
+// ADD MESSAGE
 // ----------------------------
-sendButton.addEventListener("click", sendMessage);
-
-// ----------------------------
-// ADD MESSAGE TO CHAT
-// ----------------------------
-function addMessage(text, sender) {
+function addMessage(text, type) {
     const div = document.createElement("div");
-    div.classList.add("message");
-    div.classList.add(sender);
+    div.classList.add("msg", type);
     div.textContent = text;
     chatBox.appendChild(div);
     chatBox.scrollTop = chatBox.scrollHeight;
@@ -138,13 +155,6 @@ async function sendMessage() {
 
     addMessage(message, "user");
     input.value = "";
-
-    // typing indicator
-    const typing = document.createElement("div");
-    typing.classList.add("message", "bot", "typing");
-    typing.textContent = "Thinking...";
-    chatBox.appendChild(typing);
-    chatBox.scrollTop = chatBox.scrollHeight;
 
     const res = await fetch("/ask", {
         method: "POST",
@@ -161,11 +171,19 @@ async function sendMessage() {
 
     sessionId = data.session_id;
 
-    // remove typing
-    chatBox.removeChild(typing);
+    // ----------------------------
+    // UPDATE STATUS BAR
+    // ----------------------------
+    skillEl.textContent = data.skill || "unknown";
+    scoreEl.textContent = data.skill_score ?? 0;
+    confusedEl.textContent = data.confused ? "Yes" : "No";
 
+    // ----------------------------
+    // SHOW BOT RESPONSE
+    // ----------------------------
     addMessage(data.response, "bot");
 }
+
 </script>
 
 </body>
