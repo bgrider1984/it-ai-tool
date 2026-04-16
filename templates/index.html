@@ -104,12 +104,51 @@ input.addEventListener("keydown", function(e){
     }
 });
 
-function add(text, type){
-    const div = document.createElement("div");
-    div.className = "msg " + type;
-    div.textContent = text;
-    chat.appendChild(div);
+function add(text, type, fix=null){
+    const wrapper = document.createElement("div");
+    wrapper.className = "msg " + type;
+
+    const textDiv = document.createElement("div");
+    textDiv.textContent = text;
+
+    wrapper.appendChild(textDiv);
+
+    // FIX BUTTON
+    if(fix){
+        const btn = document.createElement("button");
+        btn.textContent = "Run Fix";
+        btn.style.marginTop = "8px";
+        btn.style.background = "#22c55e";
+        btn.style.border = "none";
+        btn.style.padding = "6px 10px";
+        btn.style.borderRadius = "6px";
+        btn.style.cursor = "pointer";
+
+        btn.onclick = () => runFix(fix);
+
+        wrapper.appendChild(btn);
+    }
+
+    chat.appendChild(wrapper);
     chat.scrollTop = chat.scrollHeight;
+}
+
+async function runFix(fixName){
+
+    add("Running fix: " + fixName, "user");
+
+    const res = await fetch("/ask", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+            message: "run fix",
+            session_id: sessionId
+        })
+    });
+
+    const data = await res.json();
+
+    add(data.response, "bot");
 }
 
 async function send(){
@@ -134,7 +173,7 @@ async function send(){
     sessionId = data.session_id;
     localStorage.setItem("sessionId", sessionId);
 
-    add(data.response, "bot");
+    add(data.response, "bot", data.fix);
 }
 
 </script>
