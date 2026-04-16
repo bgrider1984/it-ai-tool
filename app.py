@@ -20,7 +20,7 @@ client = OpenAI(api_key=api_key)
 sessions = {}
 
 # ----------------------------
-# CONFUSION DETECTION
+# DETECT CONFUSION
 # ----------------------------
 def detect_confusion(messages):
     recent = messages[-4:]
@@ -32,21 +32,57 @@ def detect_confusion(messages):
         "didn't work",
         "still broken",
         "no idea",
-        "same issue"
+        "same issue",
+        "nothing happens"
     ]
 
     return sum(1 for t in triggers if t in text) >= 2
 
 # ----------------------------
-# SKILL CLASSIFICATION
+# DETECT TOPIC (WEAK AREA CLASSIFICATION)
 # ----------------------------
-def calculate_skill(level_score):
-    if level_score < -2:
-        return "beginner"
-    elif level_score < 3:
-        return "intermediate"
+def detect_topic(user_input):
+    text = user_input.lower()
+
+    topics = {
+        "outlook": ["outlook", "email", "mail", "smtp", "exchange"],
+        "network": ["wifi", "internet", "network", "vpn", "dns"],
+        "windows": ["windows", "login", "boot", "startup", "profile"],
+        "software": ["crash", "freeze", "app", "application", "program"],
+        "printer": ["printer", "print", "printing", "spooler"]
+    }
+
+    for topic, keywords in topics.items():
+        if any(k in text for k in keywords):
+            return topic
+
+    return "general"
+
+# ----------------------------
+# UPDATE WEAK AREAS
+# ----------------------------
+def update_weak_areas(session, topic, confused):
+    if "weak_areas" not in session:
+        session["weak_areas"] = {}
+
+    if topic not in session["weak_areas"]:
+        session["weak_areas"][topic] = 0
+
+    # increase weakness if confused
+    if confused:
+        session["weak_areas"][topic] -= 1
     else:
-        return "advanced"
+        session["weak_areas"][topic] += 1
+
+# ----------------------------
+# SKILL CALCULATION
+# ----------------------------
+def calculate_skill(score):
+    if score < -2:
+        return "beginner"
+    elif score < 3:
+        return "intermediate"
+    return "advanced"
 
 # ----------------------------
 # SYSTEM PROMPT
@@ -54,25 +90,17 @@ def calculate_skill(level_score):
 SYSTEM_PROMPT = """
 You are a senior IT engineer mentoring a junior technician.
 
-You adapt your teaching style based on user skill level:
-
-BEGINNER:
-- Very simple steps
-- Extra explanation
-- Slow progression
-
-INTERMEDIATE:
-- Normal troubleshooting flow
-- Light explanation
-
-ADVANCED:
-- Minimal explanation
-- Fast diagnostic steps
-
 Rules:
-- ONE step at a time
-- NEVER overwhelm the user
-- Always wait for user response
+- One step at a time
+- Clear and practical instructions
+- Adapt to user skill level and weak areas
+- Do not overwhelm user
+
+Format:
+1. What I think is happening
+2. One next step
+3. What to observe
+4. Next direction if it fails
 """
 
 # ----------------------------
@@ -99,23 +127,22 @@ def ask():
         sessions[session_id] = {
             "messages": [],
             "skill_score": 0,
-            "skill": "beginner"
+            "skill": "beginner",
+            "weak_areas": {}
         }
 
     session = sessions[session_id]
 
     # ----------------------------
-    # STORE USER MESSAGE
+    # DETECT CONFUSION + TOPIC
     # ----------------------------
     session["messages"].append({"role": "user", "content": user_input})
 
-    # ----------------------------
-    # CONFUSION CHECK
-    # ----------------------------
     confused = detect_confusion(session["messages"])
+    topic = detect_topic(user_input)
 
     # ----------------------------
-    # UPDATE SKILL SCORE
+    # UPDATE SKILL
     # ----------------------------
     if confused:
         session["skill_score"] -= 1
@@ -125,26 +152,26 @@ def ask():
     session["skill"] = calculate_skill(session["skill_score"])
 
     # ----------------------------
-    # ADAPT BEHAVIOR BY SKILL
+    # UPDATE WEAK AREAS
     # ----------------------------
-    skill_instruction = ""
+    update_weak_areas(session, topic, confused)
 
-    if session["skill"] == "beginner":
-        skill_instruction = "USER IS BEGINNER: explain simply and slowly."
-    elif session["skill"] == "intermediate":
-        skill_instruction = "USER IS INTERMEDIATE: normal troubleshooting pace."
-    else:
-        skill_instruction = "USER IS ADVANCED: be concise and technical."
+    weak_areas_sorted = sorted(
+        session["weak_areas"].items(),
+        key=lambda x: x[1]
+    )
+
+    weak_area_list = [w[0] for w in weak_areas_sorted[:3]]
 
     # ----------------------------
-    # ADD CONFUSION OVERRIDE
+    # ADAPT BEHAVIOR
     # ----------------------------
-    if confused:
-        skill_instruction += """
-USER IS CONFUSED:
-- Slow down
-- Re-explain last step more clearly
-- Ask ONE clarifying question only
+    skill_instruction = f"""
+USER SKILL: {session['skill']}
+WEAK AREAS: {', '.join(weak_area_list) if weak_area_list else 'None detected yet'}
+
+Adjust explanation based on weak areas.
+If issue matches weak area, slow down and simplify.
 """
 
     # ----------------------------
@@ -166,9 +193,6 @@ USER IS CONFUSED:
 
     reply = response.choices[0].message.content
 
-    # ----------------------------
-    # STORE RESPONSE
-    # ----------------------------
     session["messages"].append({"role": "assistant", "content": reply})
 
     return jsonify({
@@ -176,7 +200,8 @@ USER IS CONFUSED:
         "response": reply,
         "skill": session["skill"],
         "skill_score": session["skill_score"],
-        "confused": confused
+        "confused": confused,
+        "weak_areas": weak_area_list
     })
 
 
