@@ -1,228 +1,139 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>IT Coach</title>
+<meta charset="UTF-8">
+<title>IT Coach Dashboard</title>
 
-    <style>
-        body {
-            margin: 0;
-            font-family: Arial, sans-serif;
-            background: #0f172a;
-            color: white;
-        }
+<style>
+body {
+    margin:0;
+    font-family: Arial;
+    background:#0f172a;
+    color:white;
+}
 
-        .container {
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 20px;
-        }
+.wrapper {
+    display:flex;
+}
 
-        h1 {
-            text-align: center;
-            margin-bottom: 10px;
-        }
+.left {
+    flex:2;
+    padding:20px;
+}
 
-        /* ----------------------------
-           STATUS BAR
-        ---------------------------- */
-        #statusBar {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-            background: #1f2937;
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            font-size: 13px;
-        }
+.right {
+    flex:1;
+    background:#111827;
+    padding:20px;
+    border-left:2px solid #1f2937;
+}
 
-        .statusBox {
-            background: #111827;
-            padding: 8px;
-            border-radius: 6px;
-            text-align: center;
-        }
+#chat {
+    height:65vh;
+    overflow-y:auto;
+    background:#1f2937;
+    padding:10px;
+    border-radius:8px;
+}
 
-        /* ----------------------------
-           CHAT BOX
-        ---------------------------- */
-        #chatBox {
-            background: #111827;
-            height: 65vh;
-            overflow-y: auto;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 10px;
-        }
+.msg {
+    margin:8px 0;
+    padding:8px;
+    border-radius:6px;
+}
 
-        .msg {
-            padding: 10px;
-            margin: 8px 0;
-            border-radius: 8px;
-            white-space: pre-wrap;
-        }
+.user { background:#2563eb; }
+.bot { background:#374151; }
 
-        .user {
-            background: #2563eb;
-            text-align: right;
-        }
+input {
+    width:80%;
+    padding:10px;
+}
 
-        .bot {
-            background: #374151;
-            text-align: left;
-        }
+button {
+    padding:10px;
+    background:#22c55e;
+    border:none;
+    color:white;
+}
 
-        /* ----------------------------
-           INPUT AREA
-        ---------------------------- */
-        .inputArea {
-            display: flex;
-            gap: 10px;
-        }
+.panel {
+    margin-bottom:20px;
+}
 
-        input {
-            flex: 1;
-            padding: 12px;
-            border-radius: 8px;
-            border: none;
-            font-size: 16px;
-        }
-
-        button {
-            padding: 12px 18px;
-            border: none;
-            border-radius: 8px;
-            background: #22c55e;
-            font-weight: bold;
-            cursor: pointer;
-        }
-
-        button:hover {
-            background: #16a34a;
-        }
-
-        .small {
-            font-size: 12px;
-            opacity: 0.8;
-        }
-    </style>
+.small {
+    font-size:12px;
+    opacity:0.8;
+}
+</style>
 </head>
 
 <body>
 
-<div class="container">
-    <h1>IT Coaching Assistant</h1>
+<div class="wrapper">
 
-    <!-- STATUS BAR -->
-    <div id="statusBar">
-        <div class="statusBox">
-            Skill<br>
-            <strong id="skill">Beginner</strong>
-        </div>
+<!-- LEFT SIDE -->
+<div class="left">
+<h2>IT Coach</h2>
 
-        <div class="statusBox">
-            Score<br>
-            <strong id="score">0</strong>
-        </div>
+<div id="chat"></div>
 
-        <div class="statusBox">
-            Confused<br>
-            <strong id="confused">No</strong>
-        </div>
+<input id="msg" placeholder="Ask issue..." />
+<button onclick="send()">Send</button>
+</div>
 
-        <div class="statusBox">
-            Weak Areas<br>
-            <strong id="weakAreas">None</strong>
-        </div>
-    </div>
+<!-- RIGHT DASHBOARD -->
+<div class="right">
+<h3>Training Dashboard</h3>
 
-    <!-- CHAT -->
-    <div id="chatBox"></div>
+<div class="panel">
+<b>Skill Score:</b> <span id="score">0</span>
+</div>
 
-    <!-- INPUT -->
-    <div class="inputArea">
-        <input id="input" type="text" placeholder="Describe your IT issue..." />
-        <button onclick="sendMessage()">Send</button>
-    </div>
+<div class="panel">
+<b>Weak Areas:</b>
+<div id="weak">None</div>
+</div>
+
+<div class="panel">
+<b>Total Messages:</b> <span id="total">0</span>
+</div>
+</div>
+
 </div>
 
 <script>
 
 let sessionId = null;
 
-const chatBox = document.getElementById("chatBox");
-const input = document.getElementById("input");
-
-const skillEl = document.getElementById("skill");
-const scoreEl = document.getElementById("score");
-const confusedEl = document.getElementById("confused");
-const weakAreasEl = document.getElementById("weakAreas");
-
-// ----------------------------
-// ENTER KEY SUPPORT
-// ----------------------------
-input.addEventListener("keypress", function(e) {
-    if (e.key === "Enter") {
-        e.preventDefault();
-        sendMessage();
-    }
-});
-
-// ----------------------------
-// ADD MESSAGE
-// ----------------------------
-function addMessage(text, type) {
-    const div = document.createElement("div");
-    div.classList.add("msg", type);
-    div.textContent = text;
-    chatBox.appendChild(div);
-    chatBox.scrollTop = chatBox.scrollHeight;
+function add(text, cls){
+    let d = document.createElement("div");
+    d.className = "msg " + cls;
+    d.innerText = text;
+    document.getElementById("chat").appendChild(d);
 }
 
-// ----------------------------
-// SEND MESSAGE
-// ----------------------------
-async function sendMessage() {
-    const message = input.value.trim();
-    if (!message) return;
+async function send(){
 
-    addMessage(message, "user");
-    input.value = "";
+    let msg = document.getElementById("msg").value;
+    document.getElementById("msg").value="";
 
-    const res = await fetch("/ask", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            message: message,
-            session_id: sessionId
-        })
+    add(msg,"user");
+
+    let res = await fetch("/ask",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({message:msg, session_id:sessionId})
     });
 
-    const data = await res.json();
+    let data = await res.json();
 
     sessionId = data.session_id;
 
-    // ----------------------------
-    // UPDATE STATUS BAR
-    // ----------------------------
-    skillEl.textContent = data.skill || "unknown";
-    scoreEl.textContent = data.skill_score ?? 0;
-    confusedEl.textContent = data.confused ? "Yes" : "No";
+    add(data.response,"bot");
 
-    // Weak areas display
-    if (data.weak_areas && data.weak_areas.length > 0) {
-        weakAreasEl.textContent = data.weak_areas.join(", ");
-    } else {
-        weakAreasEl.textContent = "None";
-    }
-
-    // ----------------------------
-    // SHOW RESPONSE
-    // ----------------------------
-    addMessage(data.response, "bot");
+    document.getElementById("score").innerText = data.score;
+    document.getElementById("weak").innerText = (data.weak_areas || []).join(", ");
 }
 
 </script>
