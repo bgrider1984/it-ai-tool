@@ -5,86 +5,124 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
+# ----------------------------
+# OPENAI SETUP
+# ----------------------------
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
     raise RuntimeError("Missing OPENAI_API_KEY")
 
 client = OpenAI(api_key=api_key)
 
+# ----------------------------
+# SIMPLE IN-MEMORY SESSION STORE
+# ----------------------------
 sessions = {}
 
+# ----------------------------
+# ISSUE DETECTION
+# ----------------------------
 def detect_issue(text):
     t = text.lower()
 
     rules = {
         "outlook": ["outlook", "email", "mail", "exchange"],
         "vpn": ["vpn", "dns", "network", "internet", "wifi"],
-        "login": ["login", "password", "sign in", "locked out"],
+        "login": ["login", "sign in", "password", "locked out"],
         "printer": ["printer", "print"],
         "software": ["crash", "freeze", "not responding"],
         "performance": ["slow", "lag"]
     }
 
-    for k, v in rules.items():
-        if any(x in t for x in v):
-            return k
+    for issue, keywords in rules.items():
+        if any(k in t for k in keywords):
+            return issue
 
     return "general"
 
+# ----------------------------
+# PLAYBOOKS (GUIDED TROUBLESHOOTING)
+# ----------------------------
 PLAYBOOKS = {
     "outlook": [
         "Step 1: Press Windows + R",
         "Step 2: Type outlook.exe /safe",
         "Step 3: Press Enter",
-        "Step 4: Tell me what happens"
+        "Step 4: Tell me if Outlook opens in Safe Mode"
     ],
     "vpn": [
         "Step 1: Press Windows + R",
         "Step 2: Type ncpa.cpl",
-        "Step 3: Disable and re-enable adapter",
-        "Step 4: Test connection"
+        "Step 3: Disable then re-enable your network adapter",
+        "Step 4: Test VPN again"
     ],
     "login": [
-        "Step 1: Check Caps Lock",
-        "Step 2: Re-enter credentials",
+        "Step 1: Confirm Caps Lock is OFF",
+        "Step 2: Re-enter credentials carefully",
         "Step 3: Try password reset if needed"
     ]
 }
 
+# ----------------------------
+# SYSTEM PROMPT (TIER 2 STYLE)
+# ----------------------------
 SYSTEM_PROMPT = """
 You are a Tier 2 IT support engineer.
-Be concise, direct, and action-focused.
+
+Rules:
+- Be concise
+- Be action-focused
+- Ask minimal questions
+- Prefer steps over explanations
 """
 
+# ----------------------------
+# HOME
+# ----------------------------
 @app.route("/")
 def home():
     return render_template("index.html")
 
-
+# ----------------------------
+# MAIN CHAT ENDPOINT
+# ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
     data = request.json
     user_input = data.get("message", "")
     session_id = data.get("session_id")
 
+    # ----------------------------
+    # RESTORE OR CREATE SESSION
+    # ----------------------------
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
             "messages": [],
             "active_flow": None,
-            "step": 0
+            "step": 0,
+            "issue_type": None
         }
 
     session = sessions[session_id]
 
     session["messages"].append({"role": "user", "content": user_input})
 
-    issue = detect_issue(user_input)
+    # ----------------------------
+    # DETECT ISSUE (ONLY IF NOT IN FLOW)
+    # ----------------------------
+    detected = detect_issue(user_input)
 
-    if issue in PLAYBOOKS and session["active_flow"] is None:
-        session["active_flow"] = issue
-        session["step"] = 0
+    if session["active_flow"] is None:
+        session["issue_type"] = detected
 
+        if detected in PLAYBOOKS:
+            session["active_flow"] = detected
+            session["step"] = 0
+
+    # ----------------------------
+    # IF IN PLAYBOOK MODE
+    # ----------------------------
     if session["active_flow"]:
         flow = PLAYBOOKS[session["active_flow"]]
 
@@ -92,10 +130,16 @@ def ask():
             reply = flow[session["step"]]
             session["step"] += 1
         else:
-            reply = "Done. What do you see now?"
+            reply = "Troubleshooting complete. What is the result now?"
             session["active_flow"] = None
+
+    # ----------------------------
+    # FALLBACK AI MODE
+    # ----------------------------
     else:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT}
+        ]
         messages.extend(session["messages"][-6:])
 
         response = client.chat.completions.create(
@@ -112,9 +156,13 @@ def ask():
     return jsonify({
         "session_id": session_id,
         "response": reply,
-        "issue_type": issue
+        "issue_type": session["issue_type"],
+        "active_flow": session["active_flow"]
     })
 
 
+# ----------------------------
+# RUN
+# ----------------------------
 if __name__ == "__main__":
     app.run(debug=True)
