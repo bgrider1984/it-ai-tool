@@ -3,47 +3,103 @@ import uuid
 from flask import Flask, request, jsonify, session, redirect, render_template
 
 app = Flask(__name__)
-
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
 # ----------------------------
-# SIMPLE IN-MEMORY STATE
+# SESSION STATE STORE
 # ----------------------------
 sessions = {}
 
-USERS = {
-    "admin@local": "admin"
-}
+USERS = {"admin@local": "admin"}
 
 # ----------------------------
-# GET SESSION
+# SESSION INIT
 # ----------------------------
 def get_sid():
     if "sid" not in session:
-        session["sid"] = str(uuid.uuid4())
-        sessions[session["sid"]] = {
+        sid = str(uuid.uuid4())
+        session["sid"] = sid
+
+        sessions[sid] = {
             "step": 0,
+            "slots": {
+                "scope": None,
+                "trigger": None,
+                "error": None
+            },
             "history": []
         }
 
     return session["sid"]
 
 # ----------------------------
-# INTENT CLASSIFIER
+# SLOT ANALYSIS
 # ----------------------------
-def classify(msg):
+def update_slots(msg, state):
     t = msg.lower()
 
-    vague = ["not working", "won't", "broken", "issue", "problem"]
-    specific = ["error", "crash", "vpn", "outlook", "blue screen"]
+    # scope
+    if "all" in t or "everything" in t:
+        state["slots"]["scope"] = "all"
+    elif "one" in t or "single" in t:
+        state["slots"]["scope"] = "one"
 
-    if any(v in t for v in vague):
-        return "clarify"
+    # trigger
+    if "update" in t:
+        state["slots"]["trigger"] = "update"
+    elif "restart" in t:
+        state["slots"]["trigger"] = "restart"
 
-    if any(s in t for s in specific):
-        return "direct"
+    # error
+    if "error" in t or "crash" in t:
+        state["slots"]["error"] = "yes"
+    elif "no error" in t or "none" in t:
+        state["slots"]["error"] = "no"
 
-    return "clarify"
+    state["history"].append(msg.lower())
+
+    missing = [k for k, v in state["slots"].items() if v is None]
+    return state, missing
+
+# ----------------------------
+# ROOT CAUSE ENGINE
+# ----------------------------
+def diagnose(slots):
+
+    if slots["scope"] == "all" and slots["trigger"] == "update":
+        return {
+            "cause": "Likely Windows update affected shell or user session",
+            "fixes": [
+                "Restart Windows Explorer",
+                "Check Windows Update history",
+                "Boot into Safe Mode and test"
+            ]
+        }
+
+    if slots["scope"] == "all":
+        return {
+            "cause": "System-wide application launch failure",
+            "fixes": [
+                "Check user profile integrity",
+                "Run SFC /scannow",
+                "Check startup policies or antivirus blocking apps"
+            ]
+        }
+
+    if slots["scope"] == "one":
+        return {
+            "cause": "Single application launch issue",
+            "fixes": [
+                "Reinstall the affected application",
+                "Run as administrator",
+                "Clear app cache / settings"
+            ]
+        }
+
+    return {
+        "cause": "Unknown system state",
+        "fixes": ["Gather more information before proceeding"]
+    }
 
 # ----------------------------
 # ROUTES
@@ -59,14 +115,10 @@ def dashboard():
 @app.route("/login", methods=["POST"])
 def login():
     data = request.json
-
-    email = data.get("email")
-    password = data.get("password")
-
-    if USERS.get(email) != password:
+    if USERS.get(data.get("email")) != data.get("password"):
         return jsonify({"error": "invalid login"}), 401
 
-    session["user"] = email
+    session["user"] = data.get("email")
     return jsonify({"status": "ok"})
 
 @app.route("/logout")
@@ -75,80 +127,56 @@ def logout():
     return redirect("/")
 
 # ----------------------------
-# SAFE ASK ROUTE (NO BLANK RESPONSES EVER)
+# MAIN DIAGNOSTIC ENGINE
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
 
-    try:
-        data = request.json or {}
-        msg = data.get("message", "")
+    data = request.json or {}
+    msg = data.get("message", "")
 
-        if not msg:
-            return jsonify({"response": "Please enter a message."})
-
-        sid = get_sid()
-        state = sessions[sid]
-
-        state["history"].append(msg)
-
-        step = state["step"]
-
-        # ----------------------------
-        # STEP 0 - CLARIFY
-        # ----------------------------
-        if step == 0:
-            reply = (
-                "I need a bit more detail:\n\n"
-                "• Is this happening to all apps or just one?\n"
-                "• Did it start after a restart or update?\n"
-                "• Any error messages?"
-            )
-            state["step"] = 1
-
-        # ----------------------------
-        # STEP 1 - INTERPRET
-        # ----------------------------
-        elif step == 1:
-
-            t = msg.lower()
-
-            if "all" in t:
-                reply = "System-wide issue → Check Task Manager (CPU/RAM usage)."
-
-            elif "one" in t:
-                reply = "Single-app issue → Try reinstalling or Safe Mode."
-
-            elif "update" in t or "restart" in t:
-                reply = "Recent change detected → Consider system restore."
-
-            else:
-                reply = "Is this affecting ALL apps or just ONE?"
-
-            state["step"] = 2
-
-        # ----------------------------
-        # STEP 2 - FIX
-        # ----------------------------
-        else:
-            reply = (
-                "Try these steps:\n\n"
-                "1. Restart computer\n"
-                "2. Check startup apps\n"
-                "3. Run antivirus scan\n"
-                "4. Check disk health"
-            )
-
-        return jsonify({"response": reply})
-
-    except Exception as e:
-        print("ASK ERROR:", str(e))
+    # ----------------------------
+    # HANDLE INTERRUPT QUESTIONS
+    # ----------------------------
+    if "how do i" in msg.lower():
         return jsonify({
-            "response": "⚠ System error occurred. Please try again."
+            "response": "Press Ctrl + Shift + Esc to open Task Manager.\nThen come back and tell me what you see."
         })
 
+    sid = get_sid()
+    state = sessions[sid]
+
+    state, missing = update_slots(msg, state)
+
+    # ----------------------------
+    # IF MISSING INFO → DO NOT ADVANCE
+    # ----------------------------
+    if missing:
+
+        question_map = {
+            "scope": "Is this happening to ALL apps or just ONE app?",
+            "trigger": "Did this start after an UPDATE or RESTART?",
+            "error": "Are you seeing ANY error messages?"
+        }
+
+        return jsonify({
+            "response": "I need a bit more detail:\n\n" +
+                        "\n".join([question_map[m] for m in missing])
+        })
+
+    # ----------------------------
+    # FULL DIAGNOSIS
+    # ----------------------------
+    result = diagnose(state["slots"])
+
+    return jsonify({
+        "response":
+            "Root Cause:\n" + result["cause"] + "\n\n" +
+            "Recommended Fixes:\n- " + "\n- ".join(result["fixes"])
+    })
+
 # ----------------------------
-# HEALTH CHECK
+# HEALTH
 # ----------------------------
 @app.route("/health")
 def health():
