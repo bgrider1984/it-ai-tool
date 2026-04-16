@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>IT Copilot</title>
+<title>IT Help Desk Copilot</title>
 
 <style>
 body {
@@ -29,7 +29,7 @@ body {
 }
 
 .msg {
-    margin:10px 0;
+    margin:8px 0;
     padding:10px;
     border-radius:8px;
     white-space:pre-wrap;
@@ -44,7 +44,8 @@ body {
 .bot {
     background:#374151;
     align-self:flex-start;
-    max-width:90%;
+    max-width:95%;
+    line-height:1.4;
 }
 
 .inputArea {
@@ -58,6 +59,7 @@ input {
     padding:10px;
     border-radius:8px;
     border:none;
+    font-size:14px;
 }
 
 button {
@@ -74,7 +76,7 @@ button {
 <body>
 
 <div class="container">
-<h2>Junior IT Copilot</h2>
+<h2>IT Help Desk Copilot</h2>
 
 <div id="chat"></div>
 
@@ -95,16 +97,9 @@ input.addEventListener("keydown", e => {
     if(e.key === "Enter") send();
 });
 
-function addUser(text){
+function add(text, cls){
     const div = document.createElement("div");
-    div.className = "msg user";
-    div.textContent = text;
-    chat.appendChild(div);
-}
-
-function addBot(text){
-    const div = document.createElement("div");
-    div.className = "msg bot";
+    div.className = "msg " + cls;
     div.textContent = text;
     chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
@@ -115,7 +110,7 @@ async function send(){
     const msg = input.value.trim();
     if(!msg) return;
 
-    addUser(msg);
+    add(msg, "user");
     input.value = "";
 
     const res = await fetch("/ask", {
@@ -132,7 +127,7 @@ async function send(){
     sessionId = data.session_id;
     localStorage.setItem("sessionId", sessionId);
 
-    addBot(data.response);
+    add(data.response, "bot");
 }
 
 </script>
