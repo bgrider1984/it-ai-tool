@@ -5,17 +5,17 @@
 
     <style>
         body {
-            font-family: Arial;
+            font-family: Arial, sans-serif;
+            margin: 0;
             background: #0f172a;
             color: white;
-            margin: 0;
             display: flex;
             flex-direction: column;
             height: 100vh;
         }
 
         header {
-            padding: 15px;
+            padding: 12px;
             background: #111827;
             text-align: center;
             font-weight: bold;
@@ -23,15 +23,22 @@
 
         #chat {
             flex: 1;
-            padding: 15px;
+            padding: 10px;
             overflow-y: auto;
         }
 
+        #options {
+            padding: 10px;
+            background: #111827;
+            border-top: 1px solid #374151;
+        }
+
         .msg {
-            margin: 10px 0;
+            margin: 8px 0;
             padding: 10px;
             border-radius: 8px;
             max-width: 75%;
+            white-space: pre-wrap;
         }
 
         .user {
@@ -43,21 +50,6 @@
             background: #1f2937;
         }
 
-        button.option {
-            display: block;
-            margin: 5px 0;
-            padding: 8px;
-            background: #374151;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-
-        button.option:hover {
-            background: #4b5563;
-        }
-
         #inputArea {
             display: flex;
             padding: 10px;
@@ -67,11 +59,26 @@
         input {
             flex: 1;
             padding: 10px;
+            border-radius: 5px;
+            border: none;
         }
 
-        button.send {
+        button {
             margin-left: 10px;
             padding: 10px;
+            border: none;
+            border-radius: 5px;
+            background: #2563eb;
+            color: white;
+            cursor: pointer;
+        }
+
+        select {
+            width: 100%;
+            max-width: 500px;
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 5px;
         }
     </style>
 </head>
@@ -81,16 +88,17 @@
 <header>🛠 IT Troubleshooting Assistant</header>
 
 <div id="chat"></div>
+<div id="options"></div>
 
 <div id="inputArea">
     <input id="msg" placeholder="Type your issue..." />
-    <button class="send" onclick="sendMessage()">Send</button>
+    <button onclick="sendMessage()">Send</button>
 </div>
 
 <script>
 let chatHistory = [];
 
-async function sendMessage(textOverride=null) {
+async function sendMessage(textOverride = null) {
     const input = document.getElementById("msg");
     const text = textOverride || input.value;
 
@@ -115,7 +123,7 @@ async function sendMessage(textOverride=null) {
 
     const data = await res.json();
 
-    console.log("FULL RESPONSE:", data); // 🔥 DEBUG
+    console.log("FULL RESPONSE:", data);
 
     addMessage("bot", data.response);
 
@@ -124,7 +132,7 @@ async function sendMessage(textOverride=null) {
         content: data.response
     });
 
-    renderOptions(data.options);
+    renderOptions(data.options || []);
 }
 
 function addMessage(role, text) {
@@ -139,25 +147,18 @@ function addMessage(role, text) {
 }
 
 function renderOptions(options) {
-    console.log("OPTIONS:", options);
+    const container = document.getElementById("options");
+
+    container.innerHTML = "";
 
     if (!options || options.length === 0) return;
 
-    const chat = document.getElementById("chat");
-
-    const wrapper = document.createElement("div");
-    wrapper.style.margin = "10px 0";
-
     const select = document.createElement("select");
-    select.style.padding = "10px";
-    select.style.borderRadius = "5px";
-    select.style.width = "100%";
-    select.style.maxWidth = "400px";
 
-    const defaultOption = document.createElement("option");
-    defaultOption.text = "Select an option...";
-    defaultOption.value = "";
-    select.appendChild(defaultOption);
+    const defaultOpt = document.createElement("option");
+    defaultOpt.text = "Select an option...";
+    defaultOpt.value = "";
+    select.appendChild(defaultOpt);
 
     options.forEach(opt => {
         const option = document.createElement("option");
@@ -167,23 +168,13 @@ function renderOptions(options) {
     });
 
     select.onchange = () => {
-        if (select.value) {
-            sendMessage(select.value);
-            wrapper.remove(); // remove dropdown after selection
-        }
+        if (!select.value) return;
+
+        sendMessage(select.value);
+        container.innerHTML = "";
     };
 
-    wrapper.appendChild(select);
-    chat.appendChild(wrapper);
-
-    chat.scrollTop = chat.scrollHeight;
-}
-
-        container.appendChild(btn);
-    });
-
-    chat.appendChild(container);
-    chat.scrollTop = chat.scrollHeight;
+    container.appendChild(select);
 }
 </script>
 
