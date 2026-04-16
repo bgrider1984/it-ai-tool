@@ -15,12 +15,12 @@ if not api_key:
 client = OpenAI(api_key=api_key)
 
 # ----------------------------
-# SESSION STORE
+# SESSION STORAGE
 # ----------------------------
 sessions = {}
 
 # ----------------------------
-# WIZARD FLOW
+# FLOW CONFIGURATION
 # ----------------------------
 FLOW = {
     "device": {
@@ -51,14 +51,14 @@ FLOW = {
 }
 
 # ----------------------------
-# HOME
+# HOME ROUTE
 # ----------------------------
 @app.route("/")
 def home():
     return render_template("index.html")
 
 # ----------------------------
-# MAIN ENDPOINT
+# MAIN CHAT ENDPOINT
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
@@ -91,7 +91,7 @@ def ask():
                 messages=[
                     {
                         "role": "system",
-                        "content": "Classify IT issue in max 6 words."
+                        "content": "Classify the IT issue in max 6 words."
                     },
                     {"role": "user", "content": user_input}
                 ]
@@ -115,7 +115,7 @@ def ask():
         })
 
     # ----------------------------
-    # STEP 2: CONFIRM ISSUE (FIXED FLOW CONTINUATION)
+    # STEP 2: CONFIRM ISSUE
     # ----------------------------
     if step == "confirm_issue":
         if user_input.lower() == "no":
@@ -131,7 +131,6 @@ def ask():
         if user_input.lower() == "yes":
             session["step"] = "device"
 
-            # 🔥 IMPORTANT FIX: immediately continue flow
             node = FLOW["device"]
 
             return jsonify({
@@ -147,32 +146,26 @@ def ask():
         })
 
     # ----------------------------
-    # NORMAL WIZARD FLOW
+    # WIZARD FLOW (FIXED FINAL TRANSITION)
     # ----------------------------
     if step in FLOW:
         node = FLOW[step]
 
+        # store answer
         if user_input:
             session["answers"][step] = user_input
 
             if node["next"]:
                 session["step"] = node["next"]
                 step = session["step"]
-                node = FLOW[step]
 
-        return jsonify({
-            "session_id": session_id,
-            "response": node["question"],
-            "options": node["options"]
-        })
+        # ----------------------------
+        # FINAL STEP → RUN AI DIAGNOSIS IMMEDIATELY
+        # ----------------------------
+        if step == "final":
+            summary = session["answers"]
 
-    # ----------------------------
-    # FINAL STEP (AI DIAGNOSIS)
-    # ----------------------------
-    if step == "final":
-        summary = session["answers"]
-
-        prompt = f"""
+            prompt = f"""
 Issue: {session.get('issue')}
 
 Device: {summary.get("device")}
@@ -188,19 +181,28 @@ Provide:
 4. Escalation guidance
 """
 
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            max_tokens=600,
-            messages=[
-                {"role": "system", "content": "You are a senior IT support engineer."},
-                {"role": "user", "content": prompt}
-            ]
-        )
+            response = client.chat.completions.create(
+                model="gpt-4.1-mini",
+                max_tokens=600,
+                messages=[
+                    {"role": "system", "content": "You are a senior IT support engineer."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+
+            return jsonify({
+                "session_id": session_id,
+                "response": response.choices[0].message.content,
+                "options": []
+            })
+
+        # normal question step
+        node = FLOW[step]
 
         return jsonify({
             "session_id": session_id,
-            "response": response.choices[0].message.content,
-            "options": []
+            "response": node["question"],
+            "options": node["options"]
         })
 
     # ----------------------------
@@ -211,7 +213,6 @@ Provide:
         "response": "Let's continue troubleshooting.",
         "options": []
     })
-
 
 # ----------------------------
 # RUN APP
