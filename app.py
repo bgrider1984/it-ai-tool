@@ -17,13 +17,12 @@ def get_session(session_id):
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
             "history": [],
-            "last_issue": None,
-            "last_response": ""
+            "last_issue": None
         }
     return session_id, sessions[session_id]
 
 # ----------------------------
-# INTENT SWITCH DETECTION
+# INTENT SWITCH
 # ----------------------------
 def is_new_issue(prev, msg):
     triggers = ["new issue", "actually", "instead", "different", "switch", "forget"]
@@ -32,30 +31,34 @@ def is_new_issue(prev, msg):
     return any(t in msg.lower() for t in triggers)
 
 # ----------------------------
-# JUNIOR TECH COPILOT ENGINE
+# HELP DESK COPILOT ENGINE (FAST MODE)
 # ----------------------------
-def generate_help(issue, history):
+def helpdesk_response(issue, history):
 
     prompt = f"""
-You are a senior IT technician helping a junior technician.
+You are a FAST Tier 2 IT Help Desk Copilot.
 
-Rules:
-- Keep answers simple, direct, and practical
-- No enterprise language
-- No workflows or systems
-- Provide step-by-step troubleshooting
-- If needed, adapt steps based on failure feedback
-- Always prioritize the most likely fix first
+RULES:
+- Be extremely concise
+- No long explanations
+- Prioritize fastest likely fix FIRST
+- Max 3–5 steps total
+- Format like a real IT help desk technician
+- Always include a "Try this first" section
+- Only escalate if needed
 
-Return format:
+FORMAT:
 
-Problem Summary:
-Cause:
-Steps:
-1.
-2.
-3.
-What to do if it doesn't work:
+🔴 TRY THIS FIRST:
+- step 1
+- step 2
+
+🟡 IF THAT DOESN'T WORK:
+- step 1
+- step 2
+
+🔵 IF STILL NOT FIXED:
+- escalation path
 
 Issue:
 {issue}
@@ -67,8 +70,8 @@ History:
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=600
+        temperature=0.2,
+        max_tokens=450
     )
 
     return response.choices[0].message.content
@@ -90,15 +93,14 @@ def ask():
 
     session_id, session = get_session(session_id)
 
-    # reset if new issue
+    # reset context on new issue
     if is_new_issue(session["last_issue"], message):
         session["history"] = []
 
     session["history"].append(message)
     session["last_issue"] = message
 
-    # generate response
-    reply = generate_help(message, session["history"])
+    reply = helpdesk_response(message, session["history"])
 
     return jsonify({
         "session_id": session_id,
