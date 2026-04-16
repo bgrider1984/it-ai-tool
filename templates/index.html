@@ -1,134 +1,9 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>IT Copilot</title>
-
-<style>
-body {
-    margin: 0;
-    font-family: Arial;
-    color: white;
-    background: radial-gradient(circle at top, #0b1220, #05070f);
-}
-
-/* subtle grid background */
-body::before {
-    content: "";
-    position: fixed;
-    width: 100%;
-    height: 100%;
-    background-image:
-        linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
-    background-size: 40px 40px;
-    opacity: 0.12;
-    pointer-events: none;
-}
-
-.container {
-    max-width: 900px;
-    margin: auto;
-    padding: 20px;
-    position: relative;
-}
-
-h2 {
-    text-align: center;
-    color: #93c5fd;
-}
-
-.status {
-    font-size: 12px;
-    opacity: 0.7;
-    margin-bottom: 10px;
-}
-
-/* CHAT */
-#chat {
-    height: 70vh;
-    overflow-y: auto;
-    background: rgba(17,24,39,0.75);
-    backdrop-filter: blur(8px);
-    border-radius: 12px;
-    padding: 15px;
-    display: flex;
-    flex-direction: column;
-}
-
-.msg {
-    padding: 10px;
-    margin: 6px 0;
-    border-radius: 10px;
-    max-width: 70%;
-    white-space: pre-wrap;
-}
-
-.user {
-    background: #2563eb;
-    align-self: flex-end;
-}
-
-.bot {
-    background: #374151;
-    align-self: flex-start;
-}
-
-/* INPUT */
-.inputArea {
-    display: flex;
-    gap: 10px;
-    margin-top: 10px;
-}
-
-input {
-    flex: 1;
-    padding: 12px;
-    border-radius: 8px;
-    border: none;
-    background: rgba(0,0,0,0.4);
-    color: white;
-}
-
-button {
-    padding: 12px 16px;
-    border: none;
-    background: #22c55e;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: bold;
-}
-
-button:hover {
-    background: #16a34a;
-}
-</style>
-</head>
-
-<body>
-
-<div class="container">
-
-<h2>IT Copilot</h2>
-
-<div class="status" id="status">Session: Not started</div>
-
-<div id="chat"></div>
-
-<div class="inputArea">
-    <input id="input" placeholder="Describe your IT issue..." />
-    <button onclick="send()">Send</button>
-</div>
-
-</div>
-
 <script>
 
 let sessionId = localStorage.getItem("sessionId");
 
 const chat = document.getElementById("chat");
 const input = document.getElementById("input");
-const status = document.getElementById("status");
 
 input.addEventListener("keydown", function(e){
     if(e.key === "Enter"){
@@ -143,16 +18,6 @@ function add(text, type){
     div.textContent = text;
     chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
-}
-
-function updateStatus(data){
-    if(data.active_flow){
-        status.innerText = "Active Flow: " + data.active_flow;
-    } else if(data.issue_type){
-        status.innerText = "Detected Issue: " + data.issue_type;
-    } else {
-        status.innerText = "Session active";
-    }
 }
 
 async function send(){
@@ -178,11 +43,6 @@ async function send(){
     localStorage.setItem("sessionId", sessionId);
 
     add(data.response, "bot");
-
-    updateStatus(data);
 }
 
 </script>
-
-</body>
-</html>
