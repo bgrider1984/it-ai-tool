@@ -1,26 +1,21 @@
 import os
 import uuid
+import json
 from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
 
 app = Flask(__name__)
 
-# ----------------------------
-# OPENAI SETUP
-# ----------------------------
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
     raise RuntimeError("Missing OPENAI_API_KEY")
 
 client = OpenAI(api_key=api_key)
 
-# ----------------------------
-# SESSION STORE
-# ----------------------------
 sessions = {}
 
 # ----------------------------
-# MULTI-ISSUE DETECTION
+# ISSUE DETECTION
 # ----------------------------
 def detect_issues(text):
     t = text.lower()
@@ -30,55 +25,59 @@ def detect_issues(text):
         issues.append("outlook")
     if "vpn" in t or "network" in t:
         issues.append("vpn")
-    if "login" in t or "password" in t:
+    if "login" in t:
         issues.append("login")
-    if "slow" in t or "lag" in t:
-        issues.append("performance")
 
     return issues if issues else ["general"]
 
 # ----------------------------
-# AI NEXT STEP
+# AI MULTI-FIX GENERATOR
 # ----------------------------
-def ai_next_step(issues, history):
+def ai_next_steps(issues, history):
     prompt = f"""
 You are a Tier 2 IT engineer.
 
-Issues detected: {issues}
+Issues: {issues}
+History: {history}
 
-History:
-{history}
+Respond ONLY in JSON like this:
 
-Respond with:
-1. Next best troubleshooting step
-2. Confidence level (High / Medium / Low)
-3. If applicable include: RUN_FIX: <fix_name>
-
-Keep it short and actionable.
+{{
+  "message": "short explanation",
+  "fixes": [
+    {{"name": "restart_outlook", "label": "Restart Outlook", "confidence": "High"}},
+    {{"name": "safe_mode", "label": "Open in Safe Mode", "confidence": "Medium"}},
+    {{"name": "new_profile", "label": "Create New Profile", "confidence": "Low"}}
+  ]
+}}
 """
 
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=250,
-        temperature=0.3
+        temperature=0.2,
+        max_tokens=300
     )
 
-    return response.choices[0].message.content
+    try:
+        return json.loads(response.choices[0].message.content)
+    except:
+        return {
+            "message": "Try restarting the application.",
+            "fixes": []
+        }
 
 # ----------------------------
 # FIX SIMULATION
 # ----------------------------
-def run_fix_simulation(fix_name):
-    fixes = {
-        "restart_outlook": "Outlook process restarted successfully.",
-        "reset_network": "Network adapter reset completed.",
-        "flush_dns": "DNS cache cleared.",
-        "new_profile": "New Outlook profile created.",
-        "restart_pc": "System restart simulated successfully."
+def run_fix(fix):
+    results = {
+        "restart_outlook": "Outlook restarted successfully.",
+        "safe_mode": "Opened Outlook in Safe Mode.",
+        "new_profile": "New profile created.",
+        "reset_network": "Network reset complete."
     }
-
-    return fixes.get(fix_name, "Fix executed.")
+    return results.get(fix, "Fix executed.")
 
 # ----------------------------
 # ROUTES
@@ -91,70 +90,40 @@ def home():
 def ask():
     data = request.json
     user_input = data.get("message", "")
+    fix_request = data.get("run_fix")
     session_id = data.get("session_id")
 
-    # ----------------------------
-    # CREATE SESSION
-    # ----------------------------
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
-            "issues": [],
             "history": [],
-            "last_fix": None
+            "issues": []
         }
 
     session = sessions[session_id]
-    session["history"].append(user_input)
-
-    user_text = user_input.lower()
 
     # ----------------------------
     # RUN FIX
     # ----------------------------
-    if user_text == "run fix":
-        if session["last_fix"]:
-            result = run_fix_simulation(session["last_fix"])
-            return jsonify({
-                "session_id": session_id,
-                "response": f"✅ Fix executed: {session['last_fix']}\n{result}",
-                "fix": None
-            })
-        else:
-            return jsonify({
-                "session_id": session_id,
-                "response": "No fix available to run.",
-                "fix": None
-            })
+    if fix_request:
+        result = run_fix(fix_request)
+        return jsonify({
+            "session_id": session_id,
+            "response": f"✅ {result}",
+            "fixes": []
+        })
 
-    # ----------------------------
-    # DETECT ISSUES
-    # ----------------------------
+    session["history"].append(user_input)
+
     detected = detect_issues(user_input)
     session["issues"] = list(set(session["issues"] + detected))
 
-    # ----------------------------
-    # AI RESPONSE
-    # ----------------------------
-    ai_reply = ai_next_step(session["issues"], session["history"])
-
-    # ----------------------------
-    # EXTRACT FIX
-    # ----------------------------
-    fix_name = None
-
-    if "RUN_FIX:" in ai_reply:
-        fix_name = ai_reply.split("RUN_FIX:")[1].strip().split()[0]
-        session["last_fix"] = fix_name
-
-        # remove tag from visible text
-        ai_reply = ai_reply.split("RUN_FIX:")[0].strip()
+    ai_data = ai_next_steps(session["issues"], session["history"])
 
     return jsonify({
         "session_id": session_id,
-        "response": ai_reply,
-        "fix": fix_name,
-        "issues": session["issues"]
+        "response": ai_data["message"],
+        "fixes": ai_data["fixes"]
     })
 
 
