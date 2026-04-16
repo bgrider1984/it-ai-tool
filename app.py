@@ -68,8 +68,9 @@ Always respond in:
 5. Escalation Conditions
 
 Be concise, technical, and action-oriented.
-"""
 
+If the user answers previous clarifying questions, continue troubleshooting based on their response instead of repeating questions.
+"""
 # ----------------------------
 # Routes
 # ----------------------------
