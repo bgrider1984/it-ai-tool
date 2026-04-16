@@ -1,216 +1,120 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>IT Copilot</title>
+import os
+import uuid
+from flask import Flask, render_template, request, jsonify
+from openai import OpenAI
 
-<style>
-body {
-    margin: 0;
-    font-family: Arial;
-    background: #0f172a;
-    color: white;
-}
+app = Flask(__name__)
 
-.container {
-    max-width: 900px;
-    margin: auto;
-    padding: 20px;
-}
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise RuntimeError("Missing OPENAI_API_KEY")
 
-h2 {
-    text-align: center;
-}
+client = OpenAI(api_key=api_key)
 
-#chat {
-    height: 70vh;
-    overflow-y: auto;
-    background: #111827;
-    padding: 15px;
-    border-radius: 10px;
-    display: flex;
-    flex-direction: column;
-}
+sessions = {}
 
-.msg {
-    padding: 10px;
-    margin: 6px 0;
-    border-radius: 10px;
-    max-width: 70%;
-    white-space: pre-wrap;
-}
+def detect_issue(text):
+    t = text.lower()
 
-.user {
-    background: #2563eb;
-    align-self: flex-end;
-}
-
-.bot {
-    background: #374151;
-    align-self: flex-start;
-}
-
-/* ACTION BUTTONS */
-.actions {
-    margin-top: 5px;
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.actionBtn {
-    background: #22c55e;
-    border: none;
-    padding: 6px 10px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 12px;
-}
-
-.actionBtn:hover {
-    background: #16a34a;
-}
-
-.inputArea {
-    display: flex;
-    gap: 10px;
-    margin-top: 10px;
-}
-
-input {
-    flex: 1;
-    padding: 12px;
-    border-radius: 8px;
-    border: none;
-}
-
-button {
-    padding: 12px 16px;
-    border: none;
-    background: #22c55e;
-    border-radius: 8px;
-    cursor: pointer;
-}
-</style>
-</head>
-
-<body>
-
-<div class="container">
-
-<h2>IT Copilot</h2>
-
-<div id="chat"></div>
-
-<div class="inputArea">
-    <input id="input" placeholder="Describe your issue..." />
-    <button onclick="send()">Send</button>
-</div>
-
-</div>
-
-<script>
-
-let sessionId = null;
-
-const chat = document.getElementById("chat");
-const input = document.getElementById("input");
-
-input.addEventListener("keydown", function(e){
-    if(e.key === "Enter"){
-        e.preventDefault();
-        send();
+    rules = {
+        "outlook": ["outlook", "email", "mail", "exchange"],
+        "vpn": ["vpn", "dns", "network", "internet", "wifi"],
+        "login": ["login", "password", "sign in", "locked out"],
+        "printer": ["printer", "print"],
+        "software": ["crash", "freeze", "not responding"],
+        "performance": ["slow", "lag"]
     }
-});
 
-// ----------------------------
-// CHAT MESSAGE
-// ----------------------------
-function addMessage(text, type){
-    const div = document.createElement("div");
-    div.className = "msg " + type;
-    div.textContent = text;
-    chat.appendChild(div);
-    chat.scrollTop = chat.scrollHeight;
+    for k, v in rules.items():
+        if any(x in t for x in v):
+            return k
+
+    return "general"
+
+PLAYBOOKS = {
+    "outlook": [
+        "Step 1: Press Windows + R",
+        "Step 2: Type outlook.exe /safe",
+        "Step 3: Press Enter",
+        "Step 4: Tell me what happens"
+    ],
+    "vpn": [
+        "Step 1: Press Windows + R",
+        "Step 2: Type ncpa.cpl",
+        "Step 3: Disable and re-enable adapter",
+        "Step 4: Test connection"
+    ],
+    "login": [
+        "Step 1: Check Caps Lock",
+        "Step 2: Re-enter credentials",
+        "Step 3: Try password reset if needed"
+    ]
 }
 
-// ----------------------------
-// ACTION RUNNER (GUIDED STEPS)
-// ----------------------------
-async function runAction(actionId){
-    let step = 0;
+SYSTEM_PROMPT = """
+You are a Tier 2 IT support engineer.
+Be concise, direct, and action-focused.
+"""
 
-    async function next(){
-        const res = await fetch("/action", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({
-                action_id: actionId,
-                step: step
-            })
-        });
+@app.route("/")
+def home():
+    return render_template("index.html")
 
-        const data = await res.json();
 
-        if(data.done){
-            addMessage(data.message, "bot");
-            return;
+@app.route("/ask", methods=["POST"])
+def ask():
+    data = request.json
+    user_input = data.get("message", "")
+    session_id = data.get("session_id")
+
+    if not session_id or session_id not in sessions:
+        session_id = str(uuid.uuid4())
+        sessions[session_id] = {
+            "messages": [],
+            "active_flow": None,
+            "step": 0
         }
 
-        addMessage(data.instruction, "bot");
-        step = data.next_step;
-    }
+    session = sessions[session_id]
 
-    next();
-}
+    session["messages"].append({"role": "user", "content": user_input})
 
-// ----------------------------
-// SEND MESSAGE
-// ----------------------------
-async function send(){
+    issue = detect_issue(user_input)
 
-    const msg = input.value.trim();
-    if(!msg) return;
+    if issue in PLAYBOOKS and session["active_flow"] is None:
+        session["active_flow"] = issue
+        session["step"] = 0
 
-    addMessage(msg, "user");
-    input.value = "";
+    if session["active_flow"]:
+        flow = PLAYBOOKS[session["active_flow"]]
 
-    const res = await fetch("/ask", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-            message: msg,
-            session_id: sessionId
-        })
-    });
+        if session["step"] < len(flow):
+            reply = flow[session["step"]]
+            session["step"] += 1
+        else:
+            reply = "Done. What do you see now?"
+            session["active_flow"] = None
+    else:
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages.extend(session["messages"][-6:])
 
-    const data = await res.json();
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=messages,
+            max_tokens=400,
+            temperature=0.3
+        )
 
-    sessionId = data.session_id;
+        reply = response.choices[0].message.content
 
-    addMessage(data.response, "bot");
+    session["messages"].append({"role": "assistant", "content": reply})
 
-    // render actions
-    if(data.actions && data.actions.length > 0){
-        const wrap = document.createElement("div");
-        wrap.className = "actions";
+    return jsonify({
+        "session_id": session_id,
+        "response": reply,
+        "issue_type": issue
+    })
 
-        data.actions.forEach(a => {
-            const btn = document.createElement("button");
-            btn.className = "actionBtn";
-            btn.innerText = a.label;
 
-            btn.onclick = () => runAction(a.id);
-
-            wrap.appendChild(btn);
-        });
-
-        chat.appendChild(wrap);
-        chat.scrollTop = chat.scrollHeight;
-    }
-}
-
-</script>
-
-</body>
-</html>
+if __name__ == "__main__":
+    app.run(debug=True)
