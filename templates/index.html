@@ -6,31 +6,26 @@
 
 <style>
 body {
-    margin:0;
-    font-family:Arial;
+    font-family: Arial;
     background:#0b1220;
     color:white;
     display:flex;
-    align-items:center;
     justify-content:center;
+    align-items:center;
     height:100vh;
 }
 
-.card {
+.container {
     background:#111827;
-    padding:25px;
-    border-radius:12px;
+    padding:20px;
+    border-radius:10px;
     width:320px;
-}
-
-h2 {
-    margin-top:0;
 }
 
 input {
     width:100%;
     padding:10px;
-    margin-top:10px;
+    margin:5px 0;
     border:none;
     border-radius:6px;
 }
@@ -39,62 +34,65 @@ button {
     width:100%;
     padding:10px;
     margin-top:10px;
+    background:#22c55e;
     border:none;
     border-radius:6px;
-    cursor:pointer;
     color:white;
+    cursor:pointer;
 }
 
-.signup {
-    background:#22c55e;
+h2 {
+    text-align:center;
 }
 
-.login {
-    background:#2563eb;
+small {
+    color:#9ca3af;
 }
 </style>
 </head>
 
 <body>
 
-<div class="card">
-    <h2>IT Copilot</h2>
+<div class="container">
 
-    <input id="email" placeholder="Email">
-    <input id="password" type="password" placeholder="Password">
+<h2>IT Copilot</h2>
 
-    <button class="signup" onclick="signup()">Sign Up</button>
-    <button class="login" onclick="login()">Login</button>
+<input id="email" placeholder="Email">
+<input id="password" type="password" placeholder="Password">
+
+<!-- 🔥 NEW: INVITE CODE FIELD -->
+<input id="invite" placeholder="Invite Code (required for signup)">
+
+<button onclick="signup()">Sign Up</button>
+<button onclick="login()">Login</button>
+
+<small>Ask admin for invite code</small>
+
 </div>
 
 <script>
 
-function getFormData(){
-    const email = document.getElementById("email").value.trim();
-    const password = document.getElementById("password").value.trim();
-
-    return { email, password };
-}
-
 async function signup(){
 
-    const { email, password } = getFormData();
-
-    if(!email || !password){
-        alert("Please enter email and password");
-        return;
-    }
+    const email = document.getElementById("email").value;
+    const password = document.getElementById("password").value;
+    const invite_code = document.getElementById("invite").value;
 
     const res = await fetch("/signup", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ email, password })
+        credentials:"include",
+        body: JSON.stringify({
+            email,
+            password,
+            invite_code   // ✅ FIXED: now sent correctly
+        })
     });
 
     const data = await res.json();
 
     if(res.ok){
-        alert("Account created. You can now log in.");
+        alert("Account created. You can now login.");
     } else {
         alert(data.error || "Signup failed");
     }
@@ -102,17 +100,14 @@ async function signup(){
 
 async function login(){
 
-    const { email, password } = getFormData();
-
-    if(!email || !password){
-        alert("Please enter email and password");
-        return;
-    }
+    const email = document.getElementById("email").value;
+    const password = document.getElementById("password").value;
 
     const res = await fetch("/login", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ email, password })
+        credentials:"include",
+        body: JSON.stringify({ email, password })
     });
 
     const data = await res.json();
