@@ -24,10 +24,27 @@ db = SQLAlchemy(app)
 # USERS (BETA)
 # ----------------------------
 USERS = {"admin@local": {"password": "admin", "is_admin": True}}
-SESSION_INDEX = {}
 
 # ----------------------------
-# CHAT HISTORY MODEL
+# SESSION STATE ENGINE
+# ----------------------------
+sessions = {}
+
+def get_session_id():
+    if "sid" not in session:
+        sid = str(uuid.uuid4())
+        session["sid"] = sid
+
+        sessions[sid] = {
+            "step": 0,
+            "history": [],
+            "last_intent": None
+        }
+
+    return session["sid"]
+
+# ----------------------------
+# CHAT MODEL (optional persistence)
 # ----------------------------
 class ChatHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -38,21 +55,13 @@ class ChatHistory(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 # ----------------------------
-# SAFE SESSION
+# INTENT ENGINE
 # ----------------------------
-def get_session_id():
-    if "sid" not in session:
-        session["sid"] = str(uuid.uuid4())
-    return session["sid"]
-
-# ----------------------------
-# INTENT CLASSIFIER
-# ----------------------------
-def classify_intent(msg):
+def classify(msg):
     t = msg.lower()
 
-    vague = ["won't", "not working", "won’t", "doesn't", "broken", "issue"]
-    specific = ["error", "crash", "blue screen", "vpn", "outlook"]
+    vague = ["won't", "not working", "broken", "issue", "problem"]
+    specific = ["error", "crash", "vpn", "outlook", "blue screen"]
 
     if any(v in t for v in vague):
         return "clarify"
@@ -78,7 +87,6 @@ def dashboard():
 @app.route("/login", methods=["POST"])
 def login():
     data = request.json
-
     user = USERS.get(data.get("email"))
 
     if not user or user["password"] != data.get("password"):
@@ -93,112 +101,70 @@ def logout():
     return redirect("/")
 
 # ----------------------------
-# ASK (CRASH-PROOF VERSION)
+# CORE COPILOT ENGINE (NO LOOPS)
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
 
-    try:
-        if not session.get("user"):
-            return jsonify({"error": "unauthorized"}), 401
+    if not session.get("user"):
+        return jsonify({"error": "unauthorized"}), 401
 
-        data = request.json or {}
-        message = data.get("message", "")
+    data = request.json or {}
+    msg = data.get("message", "")
 
-        sid = get_session_id()
+    sid = get_session_id()
+    state = sessions[sid]
 
-        # ensure session index exists
-        if sid not in SESSION_INDEX:
-            SESSION_INDEX[sid] = {
-                "title": message[:30] if message else "New Session",
-                "created": str(datetime.utcnow())
-            }
+    state["history"].append(msg.lower())
 
-        intent = classify_intent(message)
+    intent = classify(msg)
 
-        if intent == "clarify":
-            reply = (
-                "I need a bit more detail:\n"
-                "1. Is this affecting all apps or one?\n"
-                "2. Did this start recently or after changes?\n"
-                "3. Any error messages?"
-            )
+    # ----------------------------
+    # STEP 0: ALWAYS CLARIFY FIRST
+    # ----------------------------
+    if state["step"] == 0:
+        reply = (
+            "Before I fix this, I need clarity:\n\n"
+            "• Is this happening to ALL apps or just one?\n"
+            "• Did this start after a restart or update?\n"
+            "• Any error messages?"
+        )
+        state["step"] = 1
+
+    # ----------------------------
+    # STEP 1: INTERPRET RESPONSE
+    # ----------------------------
+    elif state["step"] == 1:
+
+        t = msg.lower()
+
+        if "all" in t:
+            reply = "System-wide issue detected → Check Task Manager (CPU/RAM usage)."
+        elif "one" in t:
+            reply = "App-specific issue → Try reinstalling or Safe Mode."
+        elif "update" in t or "restart" in t:
+            reply = "Recent change detected → Consider system restore."
         else:
-            m = message.lower()
+            reply = "Need more detail: is it ALL apps or just ONE?"
 
-            if "vpn" in m:
-                reply = "Reconnect VPN → verify internet"
-            elif "outlook" in m:
-                reply = "Restart Outlook → Safe Mode test"
-            elif "crash" in m:
-                reply = "Check Task Manager → CPU/RAM usage"
-            else:
-                reply = "Restart device → re-test issue"
+        state["step"] = 2
 
-        # SAFE DB WRITE (prevents 500 crash)
-        try:
-            db.session.add(ChatHistory(
-                user=session["user"],
-                role="user",
-                message=message,
-                session_id=sid
-            ))
+    # ----------------------------
+    # STEP 2: FIX PHASE
+    # ----------------------------
+    else:
+        reply = (
+            "Try these steps:\n\n"
+            "1. Restart your computer\n"
+            "2. Check startup apps\n"
+            "3. Run antivirus scan\n"
+            "4. Check disk health"
+        )
 
-            db.session.add(ChatHistory(
-                user=session["user"],
-                role="assistant",
-                message=reply,
-                session_id=sid
-            ))
-
-            db.session.commit()
-
-        except Exception as db_error:
-            print("DB ERROR:", db_error)
-            db.session.rollback()
-
-        return jsonify({
-            "response": reply,
-            "session_id": sid
-        })
-
-    except Exception as e:
-        print("ASK ERROR:", e)
-        return jsonify({"error": "internal server error"}), 500
-
-# ----------------------------
-# SESSIONS
-# ----------------------------
-@app.route("/sessions")
-def sessions_list():
-    if not session.get("user"):
-        return jsonify({"error": "unauthorized"}), 401
-
-    return jsonify([
-        {
-            "session_id": sid,
-            "title": data["title"]
-        }
-        for sid, data in SESSION_INDEX.items()
-    ])
-
-# ----------------------------
-# LOAD SESSION
-# ----------------------------
-@app.route("/load_session/<sid>")
-def load_session(sid):
-
-    if not session.get("user"):
-        return jsonify({"error": "unauthorized"}), 401
-
-    chats = ChatHistory.query.filter_by(
-        session_id=sid
-    ).order_by(ChatHistory.timestamp.asc()).all()
-
-    return jsonify([
-        {"role": c.role, "message": c.message}
-        for c in chats
-    ])
+    return jsonify({
+        "response": reply,
+        "session_id": sid
+    })
 
 # ----------------------------
 # HEALTH
@@ -208,7 +174,7 @@ def health():
     return jsonify({
         "status": "ok",
         "users": len(USERS),
-        "sessions": len(SESSION_INDEX)
+        "sessions": len(sessions)
     })
 
 # ----------------------------
