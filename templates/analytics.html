@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Beta Analytics</title>
+
+<style>
+body {
+    font-family:Arial;
+    background:#0b1220;
+    color:white;
+    padding:20px;
+}
+
+.card {
+    background:#111827;
+    padding:15px;
+    margin-bottom:15px;
+    border-radius:10px;
+}
+
+.stat {
+    font-size:20px;
+    font-weight:bold;
+    color:#22c55e;
+}
+</style>
+</head>
+
+<body>
+
+<h1>📊 Beta Analytics Intelligence</h1>
+
+<div class="card">
+<h3>Total Users</h3>
+<div class="stat">{{ total_users }}</div>
+</div>
+
+<div class="card">
+<h3>Total Messages</h3>
+<div class="stat">{{ total_messages }}</div>
+</div>
+
+<div class="card">
+<h3>Feedback Stats</h3>
+<p>👍 Helpful: {{ helpful }}</p>
+<p>👎 Not Helpful: {{ not_helpful }}</p>
+<p>Total Feedback: {{ total_feedback }}</p>
+</div>
+
+<div class="card">
+<h3>Top User Issues (Recent)</h3>
+<ul>
+{% for i in issues %}
+<li>{{ i }}</li>
+{% endfor %}
+</ul>
+</div>
+
+</body>
+</html>
