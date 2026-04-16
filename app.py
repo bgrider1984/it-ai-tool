@@ -14,78 +14,64 @@ client = OpenAI(api_key=api_key)
 sessions = {}
 
 # ----------------------------
-# ISSUE DETECTION
+# MULTI-ISSUE DETECTION
 # ----------------------------
-def detect_issue(text):
+def detect_issues(text):
     t = text.lower()
+    issues = []
+
     if "outlook" in t:
-        return "outlook"
+        issues.append("outlook")
     if "vpn" in t or "network" in t:
-        return "vpn"
+        issues.append("vpn")
     if "login" in t or "password" in t:
-        return "login"
-    return "general"
+        issues.append("login")
+    if "slow" in t or "lag" in t:
+        issues.append("performance")
+
+    return issues if issues else ["general"]
 
 # ----------------------------
-# TREE PLAYBOOKS
+# AI NEXT STEP WITH CONFIDENCE
 # ----------------------------
-PLAYBOOKS = {
-    "outlook": {
-        "start": "safe_mode",
-        "nodes": {
-            "safe_mode": {
-                "question": "Open Outlook in Safe Mode (Win+R → outlook.exe /safe). Did it open?",
-                "yes": "disable_addins",
-                "no": "error_check"
-            },
-            "disable_addins": {
-                "message": "Disable all add-ins and restart Outlook normally.",
-                "end": True
-            },
-            "error_check": {
-                "question": "Do you see an error message?",
-                "yes": "error_specific",
-                "no": "new_profile"
-            },
-            "error_specific": {
-                "message": "Capture the exact error and check Microsoft docs.",
-                "end": True
-            },
-            "new_profile": {
-                "message": "Create a new Outlook profile.",
-                "end": True
-            }
-        }
-    }
-}
-
-# ----------------------------
-# AI DYNAMIC TROUBLESHOOTING
-# ----------------------------
-def ai_next_step(issue, history):
+def ai_next_step(issues, history):
     prompt = f"""
-You are a Tier 2 IT engineer continuing troubleshooting.
+You are a Tier 2 IT engineer.
 
-Issue: {issue}
+Issues detected: {issues}
 
-Previous steps taken:
+History:
 {history}
 
-Provide:
-- The next best troubleshooting step
-- Be concise
-- Do NOT repeat previous steps
-- If needed, ask ONE focused question
+Respond with:
+1. Next best troubleshooting step
+2. Confidence level (High / Medium / Low)
+3. If applicable, provide a fix command label like: RUN_FIX: <short name>
+
+Keep it concise.
 """
 
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=200,
+        max_tokens=250,
         temperature=0.3
     )
 
     return response.choices[0].message.content
+
+# ----------------------------
+# AUTO FIX SIMULATION
+# ----------------------------
+def run_fix_simulation(fix_name):
+    fixes = {
+        "restart_outlook": "Outlook process restarted successfully.",
+        "reset_network": "Network adapter reset completed.",
+        "flush_dns": "DNS cache cleared.",
+        "new_profile": "New Outlook profile created."
+    }
+
+    return fixes.get(fix_name, "Fix executed.")
 
 # ----------------------------
 # ROUTES
@@ -103,9 +89,9 @@ def ask():
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
-            "issue": None,
-            "node": None,
-            "history": []
+            "issues": [],
+            "history": [],
+            "last_fix": None
         }
 
     session = sessions[session_id]
@@ -114,72 +100,45 @@ def ask():
     user_text = user_input.lower()
 
     # ----------------------------
-    # DETECT ISSUE
+    # HANDLE FIX EXECUTION
     # ----------------------------
-    if session["issue"] is None:
-        session["issue"] = detect_issue(user_input)
-
-        if session["issue"] in PLAYBOOKS:
-            session["node"] = PLAYBOOKS[session["issue"]]["start"]
-
-    issue = session["issue"]
-
-    # ----------------------------
-    # TREE LOGIC
-    # ----------------------------
-    if issue in PLAYBOOKS and session["node"]:
-        tree = PLAYBOOKS[issue]["nodes"]
-        current = tree[session["node"]]
-
-        # QUESTION NODE
-        if "question" in current:
-
-            if "yes" in user_text or "no" in user_text:
-                next_node = current["yes"] if "yes" in user_text else current["no"]
-                session["node"] = next_node
-
-                next_data = tree[next_node]
-
-                if next_data.get("end"):
-                    session["node"] = None
-
-                    # 🔥 AI CONTINUES AFTER TREE ENDS
-                    ai_reply = ai_next_step(issue, session["history"])
-
-                    return jsonify({
-                        "session_id": session_id,
-                        "response": next_data["message"] + "\n\n" + ai_reply
-                    })
-
-                return jsonify({
-                    "session_id": session_id,
-                    "response": next_data.get("question", next_data.get("message"))
-                })
-
+    if user_text.startswith("run fix"):
+        if session["last_fix"]:
+            result = run_fix_simulation(session["last_fix"])
             return jsonify({
                 "session_id": session_id,
-                "response": current["question"]
+                "response": f"✅ Fix executed: {session['last_fix']}\n{result}"
             })
-
-        # MESSAGE NODE
-        if current.get("end"):
-            session["node"] = None
-
-            ai_reply = ai_next_step(issue, session["history"])
-
+        else:
             return jsonify({
                 "session_id": session_id,
-                "response": current["message"] + "\n\n" + ai_reply
+                "response": "No fix available to run."
             })
 
     # ----------------------------
-    # FULL AI MODE
+    # DETECT MULTIPLE ISSUES
     # ----------------------------
-    ai_reply = ai_next_step(issue, session["history"])
+    detected = detect_issues(user_input)
+    session["issues"] = list(set(session["issues"] + detected))
+
+    # ----------------------------
+    # AI DECISION ENGINE
+    # ----------------------------
+    ai_reply = ai_next_step(session["issues"], session["history"])
+
+    # ----------------------------
+    # EXTRACT FIX LABEL
+    # ----------------------------
+    if "RUN_FIX:" in ai_reply:
+        fix_name = ai_reply.split("RUN_FIX:")[1].strip().split()[0]
+        session["last_fix"] = fix_name
+
+        ai_reply += f"\n\n👉 Type 'run fix' to execute: {fix_name}"
 
     return jsonify({
         "session_id": session_id,
-        "response": ai_reply
+        "response": ai_reply,
+        "issues": session["issues"]
     })
 
 
