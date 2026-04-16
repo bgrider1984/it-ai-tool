@@ -20,30 +20,30 @@ client = OpenAI(api_key=api_key)
 sessions = {}
 
 # ----------------------------
-# SYSTEM PROMPT (CORE ENGINE)
+# SYSTEM PROMPT (CONTROLLED AI)
 # ----------------------------
 SYSTEM_PROMPT = """
 You are an enterprise IT troubleshooting assistant.
 
 Your job:
-- Diagnose IT issues step-by-step
-- Ask ONLY one question at a time
-- Adapt dynamically based on user responses
-- Avoid repeating questions
-- Stop asking questions when enough information is collected
+- Ask one focused troubleshooting question at a time
+- ALWAYS include multiple-choice options (4 max)
+- Always include "Not sure" as the last option
+- Keep options short and actionable
+- Do NOT ask open-ended questions
 
-When you have enough information, respond with:
+When enough information is collected, respond with:
+
 FINAL_DIAGNOSIS:
-then provide:
 1. Likely cause
 2. Step-by-step fix
-3. Commands (if applicable)
+3. Commands if applicable
 4. Prevention tips
 
 Rules:
 - Be concise
-- Be technical
-- Never ask irrelevant questions
+- Be technical but simple
+- Never repeat the same question
 """
 
 # ----------------------------
@@ -52,6 +52,16 @@ Rules:
 @app.route("/")
 def home():
     return render_template("index.html")
+
+# ----------------------------
+# HELPERS
+# ----------------------------
+def extract_options(text):
+    """
+    Ensures UI always gets options.
+    If AI forgets, we safely fallback.
+    """
+    return ["Not sure"]
 
 # ----------------------------
 # MAIN ENDPOINT
@@ -74,7 +84,7 @@ def ask():
     session = sessions[session_id]
 
     # ----------------------------
-    # ADD USER MESSAGE
+    # STORE USER INPUT
     # ----------------------------
     session["messages"].append({"role": "user", "content": user_input})
 
@@ -89,25 +99,62 @@ def ask():
     # ----------------------------
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
-        max_tokens=600,
+        max_tokens=500,
         messages=messages
     )
 
     reply = response.choices[0].message.content
 
     # ----------------------------
+    # DETECT FINAL ANSWER
+    # ----------------------------
+    is_final = "FINAL_DIAGNOSIS" in reply
+
+    # ----------------------------
+    # GENERATE SAFE OPTIONS
+    # ----------------------------
+    options = []
+
+    if not is_final:
+        # Ask AI to propose options (second lightweight call avoided for cost)
+        # We infer simple safe defaults based on question type
+
+        if "error" in reply.lower():
+            options = [
+                "Yes",
+                "No",
+                "Not sure"
+            ]
+        elif "network" in reply.lower():
+            options = [
+                "WiFi issue",
+                "No internet",
+                "Slow connection",
+                "Not sure"
+            ]
+        elif "outlook" in reply.lower() or "email" in reply.lower():
+            options = [
+                "Won't open",
+                "Not syncing",
+                "Error message",
+                "Not sure"
+            ]
+        else:
+            options = [
+                "Yes",
+                "No",
+                "Not sure"
+            ]
+
+    # ----------------------------
     # STORE ASSISTANT RESPONSE
     # ----------------------------
     session["messages"].append({"role": "assistant", "content": reply})
 
-    # ----------------------------
-    # DETECT FINAL DIAGNOSIS
-    # ----------------------------
-    is_final = "FINAL_DIAGNOSIS" in reply
-
     return jsonify({
         "session_id": session_id,
         "response": reply,
+        "options": options,
         "done": is_final
     })
 
