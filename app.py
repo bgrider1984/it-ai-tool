@@ -1,7 +1,10 @@
 from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
+from dotenv import load_dotenv
 import json
 import os
+
+load_dotenv()
 
 app = Flask(__name__)
 
