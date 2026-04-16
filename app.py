@@ -1,227 +1,162 @@
 import os
+import sys
 import uuid
-import stripe
-import bcrypt
 from flask import Flask, request, jsonify, render_template
+
+# ----------------------------
+# SAFE IMPORT WRAPPERS
+# ----------------------------
+def safe_import(module_name):
+    try:
+        return __import__(module_name)
+    except Exception as e:
+        print(f"[WARN] Missing optional dependency: {module_name} -> {e}")
+        return None
+
+stripe = safe_import("stripe")
+bcrypt = safe_import("bcrypt")
+
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
-from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv()
-
+# ----------------------------
+# APP INIT
+# ----------------------------
 app = Flask(__name__)
 
 # ----------------------------
-# CONFIG
+# ENV VALIDATION (NO CRASH)
 # ----------------------------
-app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+REQUIRED_ENV_VARS = [
+    "OPENAI_API_KEY",
+    "DATABASE_URL"
+]
 
+missing = [v for v in REQUIRED_ENV_VARS if not os.getenv(v)]
+
+if missing:
+    print(f"[FATAL CONFIG ERROR] Missing: {missing}")
+    # DO NOT CRASH HARD — allow Render to show error page
+    app.config["CONFIG_ERROR"] = True
+else:
+    app.config["CONFIG_ERROR"] = False
+
+# ----------------------------
+# DATABASE
+# ----------------------------
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///fallback.db")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID")
+# ----------------------------
+# OPENAI SAFE INIT
+# ----------------------------
+client = None
+if os.getenv("OPENAI_API_KEY"):
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ----------------------------
-# DATABASE MODELS
+# MODELS (SAFE)
 # ----------------------------
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.LargeBinary, nullable=False)
-    plan = db.Column(db.String(20), default="free")
-    stripe_customer_id = db.Column(db.String(120))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
 class Usage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-
-class Session(db.Model):
-    id = db.Column(db.String(120), primary_key=True)
-    user_id = db.Column(db.Integer)
-    history = db.Column(db.Text)
+    session = db.Column(db.String(120))
+    issue = db.Column(db.Text)
 
 # ----------------------------
-# HELPERS
+# ERROR HANDLER (NO STACK TRACES TO USERS)
 # ----------------------------
-def hash_password(password):
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt())
-
-def check_password(password, hashed):
-    return bcrypt.checkpw(password.encode(), hashed)
-
-def get_user_by_token(token):
-    return User.query.filter_by(id=token).first()
+@app.errorhandler(Exception)
+def handle_error(e):
+    return jsonify({
+        "error": "Internal server error",
+        "message": str(e) if app.debug else "Something went wrong"
+    }), 500
 
 # ----------------------------
-# AI ENGINE
+# HEALTH CHECK (RENDER USES THIS)
 # ----------------------------
-def generate_response(message, history):
-
-    prompt = f"""
-You are a Tier 2 IT Help Desk Copilot.
-
-Be concise and practical.
-
-Format:
-🔴 Fix first:
-🟡 Next steps:
-🔵 Escalation:
-
-Issue:
-{message}
-
-History:
-{history}
-"""
-
-    res = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=500
-    )
-
-    return res.choices[0].message.content
+@app.route("/health")
+def health():
+    return jsonify({
+        "status": "ok",
+        "config_ok": not app.config["CONFIG_ERROR"],
+        "stripe_loaded": stripe is not None,
+        "bcrypt_loaded": bcrypt is not None,
+        "openai_loaded": client is not None
+    })
 
 # ----------------------------
-# ROUTES
+# HOME
 # ----------------------------
 @app.route("/")
 def home():
+    if app.config["CONFIG_ERROR"]:
+        return """
+        <h2>⚠ Configuration Error</h2>
+        <p>Missing environment variables. Check server logs.</p>
+        """, 500
+
     return render_template("index.html")
 
 # ----------------------------
-# SIGNUP
+# AI ENGINE (SAFE FALLBACK)
 # ----------------------------
-@app.route("/signup", methods=["POST"])
-def signup():
+def generate_response(message):
 
-    data = request.json
-    email = data["email"]
-    password = hash_password(data["password"])
+    if client is None:
+        return "AI service not configured. Missing OPENAI_API_KEY."
 
-    if User.query.filter_by(email=email).first():
-        return jsonify({"error": "User exists"}), 400
+    try:
+        res = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{
+                "role": "user",
+                "content": f"You are an IT help desk copilot. Be concise.\n\nIssue: {message}"
+            }],
+            temperature=0.2,
+            max_tokens=400
+        )
 
-    user = User(email=email, password=password)
-    db.session.add(user)
-    db.session.commit()
+        return res.choices[0].message.content
 
-    return jsonify({"message": "User created"})
-
-# ----------------------------
-# LOGIN
-# ----------------------------
-@app.route("/login", methods=["POST"])
-def login():
-
-    data = request.json
-    user = User.query.filter_by(email=data["email"]).first()
-
-    if not user or not check_password(data["password"], user.password):
-        return jsonify({"error": "Invalid credentials"}), 401
-
-    return jsonify({"user_id": user.id, "plan": user.plan})
+    except Exception as e:
+        return f"AI error fallback response: {str(e)}"
 
 # ----------------------------
-# STRIPE CHECKOUT
-# ----------------------------
-@app.route("/create-checkout", methods=["POST"])
-def create_checkout():
-
-    data = request.json
-    user = User.query.get(data["user_id"])
-
-    session = stripe.checkout.Session.create(
-        payment_method_types=["card"],
-        mode="subscription",
-        line_items=[{
-            "price": STRIPE_PRICE_ID,
-            "quantity": 1
-        }],
-        success_url="https://yourdomain.com/success",
-        cancel_url="https://yourdomain.com/cancel",
-        customer_email=user.email
-    )
-
-    return jsonify({"url": session.url})
-
-# ----------------------------
-# STRIPE WEBHOOK
-# ----------------------------
-@app.route("/stripe-webhook", methods=["POST"])
-def stripe_webhook():
-
-    payload = request.data
-    event = stripe.Event.construct_from(
-        request.json, stripe.api_key
-    )
-
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        email = session["customer_email"]
-
-        user = User.query.filter_by(email=email).first()
-        if user:
-            user.plan = "pro"
-            db.session.commit()
-
-    return jsonify({"status": "ok"})
-
-# ----------------------------
-# MAIN AI REQUEST
+# MAIN ENDPOINT
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
 
-    data = request.json
-
-    user_id = data.get("user_id")
+    data = request.json or {}
     message = data.get("message", "")
-    session_id = data.get("session_id")
+    session_id = data.get("session_id", str(uuid.uuid4()))
 
-    user = User.query.get(user_id)
+    if not message:
+        return jsonify({"error": "No message provided"}), 400
 
-    if not user:
-        return jsonify({"error": "Invalid user"}), 403
+    response = generate_response(message)
 
-    # usage tracking
-    usage = Usage(user_id=user.id)
-    db.session.add(usage)
+    db.session.add(Usage(session=session_id, issue=message))
     db.session.commit()
-
-    # simple free tier limit
-    if user.plan == "free":
-        count = Usage.query.filter_by(user_id=user.id).count()
-        if count > 50:
-            return jsonify({"error": "Upgrade to Pro"}), 403
-
-    session = Session.query.get(session_id)
-
-    if not session:
-        session_id = str(uuid.uuid4())
-        session = Session(id=session_id, user_id=user.id, history="")
-
-    session.history += f"\n{message}"
-    db.session.add(session)
-    db.session.commit()
-
-    response = generate_response(message, session.history)
 
     return jsonify({
         "session_id": session_id,
-        "response": response,
-        "plan": user.plan
+        "response": response
     })
 
-
+# ----------------------------
+# SAFE STARTUP
+# ----------------------------
 if __name__ == "__main__":
-    with app.app_context():
-        db.create_all()
-    app.run(debug=True)
+    try:
+        with app.app_context():
+            db.create_all()
+
+        print("✅ Server starting safely...")
+        app.run(host="0.0.0.0", port=10000)
+
+    except Exception as e:
+        print(f"[FATAL STARTUP ERROR] {e}")
+        sys.exit(1)
