@@ -12,11 +12,7 @@ body {
     color:white;
 }
 
-.container {
-    max-width:900px;
-    margin:auto;
-    padding:20px;
-}
+.container { max-width:900px; margin:auto; padding:20px; }
 
 #chat {
     height:70vh;
@@ -63,41 +59,25 @@ body {
     color:white;
 }
 
-.inputArea {
-    display:flex;
-    gap:10px;
-    margin-top:10px;
-}
+.inputArea { display:flex; gap:10px; margin-top:10px; }
 
-input {
-    flex:1;
-    padding:10px;
-    border-radius:8px;
-    border:none;
-}
+input { flex:1; padding:10px; border-radius:8px; border:none; }
 
-button.send {
-    padding:10px 16px;
-    background:#22c55e;
-    border:none;
-    border-radius:8px;
-}
+button.send { padding:10px 16px; background:#22c55e; border:none; border-radius:8px; }
 </style>
 </head>
 
 <body>
 
 <div class="container">
-
 <h2>IT Copilot</h2>
 
 <div id="chat"></div>
 
 <div class="inputArea">
-    <input id="input" placeholder="Describe issue..." />
-    <button class="send" onclick="send()">Send</button>
+<input id="input" placeholder="Describe issue..." />
+<button class="send" onclick="send()">Send</button>
 </div>
-
 </div>
 
 <script>
@@ -114,7 +94,6 @@ input.addEventListener("keydown", e => {
 function add(text, type, fixes=[], feedback=false, fixName=null){
     const div = document.createElement("div");
     div.className = "msg " + type;
-
     div.textContent = text;
 
     fixes.forEach(fix => {
@@ -157,12 +136,10 @@ async function runFix(fix){
     });
 
     const data = await res.json();
-
     add(data.response, "bot", [], data.ask_feedback, data.current_fix);
 }
 
 async function sendFeedback(fix, result){
-
     const res = await fetch("/ask", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -173,12 +150,10 @@ async function sendFeedback(fix, result){
     });
 
     const data = await res.json();
-
     add(data.response, "bot", data.fixes || [], data.ask_feedback, data.current_fix);
 }
 
 async function send(){
-
     const msg = input.value.trim();
     if(!msg) return;
 
