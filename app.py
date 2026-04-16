@@ -1,40 +1,74 @@
-@app.route("/signup", methods=["POST"])
-def signup():
+<!DOCTYPE html>
+<html>
+<head>
+<title>Admin Panel</title>
 
-    data = request.json or {}
-    email = data.get("email", "").strip()
-    password = data.get("password", "").strip()
+<style>
+body {
+    font-family: Arial;
+    background:#0b1220;
+    color:white;
+    padding:20px;
+}
 
-    if not email or not password:
-        return jsonify({"error": "Email and password required"}), 400
+.box {
+    background:#111827;
+    padding:15px;
+    margin-bottom:15px;
+    border-radius:10px;
+}
 
-    existing = User.query.filter_by(email=email).first()
-    if existing:
-        return jsonify({"error": "User already exists"}), 400
+button {
+    padding:10px;
+    background:#22c55e;
+    color:white;
+    border:none;
+    border-radius:6px;
+    cursor:pointer;
+}
+</style>
+</head>
 
-    user = User(email=email, password=password)
+<body>
 
-    db.session.add(user)
-    db.session.commit()
+<h1>🧠 Beta Admin Panel</h1>
 
-    return jsonify({"status": "created"})
+<div class="box">
+<h3>Generate Invite</h3>
+<button onclick="genInvite()">Create Invite Code</button>
+<p id="invite"></p>
+</div>
 
+<div class="box">
+<h3>Users</h3>
+<ul>
+{% for u in users %}
+<li>{{u.email}} | plan: {{u.plan}}</li>
+{% endfor %}
+</ul>
+</div>
 
-@app.route("/login", methods=["POST"])
-def login():
+<div class="box">
+<h3>Feedback</h3>
+<ul>
+{% for f in feedback %}
+<li>{{f.message}} → Helpful: {{f.helpful}}</li>
+{% endfor %}
+</ul>
+</div>
 
-    data = request.json or {}
-    email = data.get("email", "").strip()
-    password = data.get("password", "").strip()
+<script>
 
-    if not email or not password:
-        return jsonify({"error": "Missing credentials"}), 400
+async function genInvite(){
+    const res = await fetch("/admin/generate-invite", {
+        method:"POST"
+    });
 
-    user = User.query.filter_by(email=email, password=password).first()
+    const data = await res.json();
+    document.getElementById("invite").innerText = data.invite;
+}
 
-    if not user:
-        return jsonify({"error": "Invalid login"}), 401
+</script>
 
-    session["user_id"] = user.id
-
-    return jsonify({"status": "logged_in"})
+</body>
+</html>
