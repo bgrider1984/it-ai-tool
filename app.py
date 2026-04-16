@@ -12,6 +12,23 @@ if not api_key:
 
 client = OpenAI(api_key=api_key)
 
+MEMORY_FILE = "memory.json"
+
+# ----------------------------
+# LOAD MEMORY
+# ----------------------------
+def load_memory():
+    if not os.path.exists(MEMORY_FILE):
+        return {}
+    with open(MEMORY_FILE, "r") as f:
+        return json.load(f)
+
+def save_memory(data):
+    with open(MEMORY_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+memory = load_memory()
+
 sessions = {}
 
 # ----------------------------
@@ -25,62 +42,94 @@ def detect_issues(text):
         issues.append("outlook")
     if "vpn" in t or "network" in t:
         issues.append("network")
-    if "login" in t or "password" in t:
+    if "login" in t:
         issues.append("auth")
 
     return issues if issues else ["general"]
 
 # ----------------------------
+# UPDATE MEMORY (NEW)
+# ----------------------------
+def update_memory(issue, fix, result):
+    if issue not in memory:
+        memory[issue] = {}
+
+    if fix not in memory[issue]:
+        memory[issue][fix] = {"success": 0, "fail": 0}
+
+    if result == "yes":
+        memory[issue][fix]["success"] += 1
+    else:
+        memory[issue][fix]["fail"] += 1
+
+    save_memory(memory)
+
+# ----------------------------
+# GET MEMORY INSIGHTS (NEW)
+# ----------------------------
+def get_memory_insights(issue):
+    if issue not in memory:
+        return ""
+
+    stats = memory[issue]
+
+    ranked = sorted(
+        stats.items(),
+        key=lambda x: x[1]["success"] - x[1]["fail"],
+        reverse=True
+    )
+
+    if not ranked:
+        return ""
+
+    best = ranked[0]
+
+    return f"Previous successful fix pattern: {best[0]} (Success: {best[1]['success']})"
+
+# ----------------------------
 # ROOT CAUSE ENGINE
 # ----------------------------
 def analyze_root_cause(failed_fixes, issues):
-    pattern_score = {
-        "dns": 0,
-        "profile": 0,
-        "network": 0,
-        "auth": 0,
-        "outlook": 0
-    }
+    if not failed_fixes:
+        return None
 
-    for fix in failed_fixes:
-        if fix in ["reset_network", "flush_dns"]:
-            pattern_score["dns"] += 2
-            pattern_score["network"] += 1
+    score = {"network":0,"profile":0,"auth":0,"outlook":0}
 
-        if fix in ["new_profile"]:
-            pattern_score["profile"] += 3
+    for f in failed_fixes:
+        if f in ["reset_network"]:
+            score["network"] += 2
+        if f in ["new_profile"]:
+            score["profile"] += 2
+        if f in ["safe_mode"]:
+            score["outlook"] += 2
 
-        if fix in ["restart_outlook", "safe_mode"]:
-            pattern_score["outlook"] += 2
+    best = max(score, key=score.get)
 
-    best = max(pattern_score, key=pattern_score.get)
-
-    if pattern_score[best] == 0:
+    if score[best] == 0:
         return None
 
     return {
         "root_cause": best,
-        "confidence": "Medium" if pattern_score[best] < 3 else "High",
-        "reasoning": f"Pattern detected from failed fixes: {failed_fixes}"
+        "confidence": "High" if score[best] >= 3 else "Medium"
     }
 
 # ----------------------------
-# AI FIX GENERATION
+# AI ENGINE
 # ----------------------------
-def ai_next_steps(issues, history, failed_fix=None):
+def ai_next_steps(issues, history, memory_hint="", failed_fix=None):
     prompt = f"""
 You are a Tier 2 IT engineer.
 
 Issues: {issues}
 History: {history}
 
+Memory Insight:
+{memory_hint}
+
 """
 
     if failed_fix:
-        prompt += f"""
-Previous fix FAILED: {failed_fix}
-Avoid repeating same approach. Change strategy.
-"""
+        prompt += f"\nPrevious fix failed: {failed_fix}\nAvoid repeating similar steps."
 
     prompt += """
 Return ONLY JSON:
@@ -103,38 +152,22 @@ Return ONLY JSON:
     try:
         return json.loads(response.choices[0].message.content)
     except:
-        return {
-            "message": "Try restarting Outlook.",
-            "fixes": []
-        }
+        return {"message": "Try restarting Outlook.", "fixes": []}
 
 # ----------------------------
 # FIX INSTRUCTIONS
 # ----------------------------
 def get_fix_instructions(fix):
     steps = {
-        "restart_outlook": """Restart Outlook:
-1. Open Task Manager
-2. End Outlook
-3. Reopen""",
-
-        "safe_mode": """Safe Mode:
-1. Win + R
-2. outlook.exe /safe""",
-
-        "new_profile": """New Profile:
-1. Control Panel → Mail
-2. Show Profiles → Add""",
-
-        "reset_network": """Network Reset:
-1. ncpa.cpl
-2. Disable/Enable adapter"""
+        "restart_outlook": "1. Task Manager → End Outlook → Reopen",
+        "safe_mode": "Win + R → outlook.exe /safe",
+        "new_profile": "Control Panel → Mail → Profiles → Add",
+        "reset_network": "ncpa.cpl → disable/enable adapter"
     }
-
     return steps.get(fix, "No instructions available.")
 
 # ----------------------------
-# ROUTES
+# ROUTE
 # ----------------------------
 @app.route("/")
 def home():
@@ -149,9 +182,6 @@ def ask():
     fix_request = data.get("run_fix")
     feedback = data.get("feedback")
 
-    # ----------------------------
-    # SESSION INIT
-    # ----------------------------
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
@@ -179,22 +209,34 @@ def ask():
         })
 
     # ----------------------------
-    # FEEDBACK LOOP + RCA
+    # FEEDBACK + MEMORY UPDATE
     # ----------------------------
     if feedback:
         fix = feedback.get("fix")
         result = feedback.get("result")
 
+        primary_issue = session["issues"][0] if session["issues"] else "general"
+
+        update_memory(primary_issue, fix, result)
+
         if result == "no":
             session["failed_fixes"].append(fix)
 
             rca = analyze_root_cause(session["failed_fixes"], session["issues"])
-            ai_data = ai_next_steps(session["issues"], session["history"], failed_fix=fix)
 
-            response_text = "Got it — continuing troubleshooting..."
+            memory_hint = get_memory_insights(primary_issue)
+
+            ai_data = ai_next_steps(
+                session["issues"],
+                session["history"],
+                memory_hint=memory_hint,
+                failed_fix=fix
+            )
+
+            response_text = "Continuing troubleshooting..."
 
             if rca:
-                response_text += f"\n\n🔍 Root Cause Analysis:\nLikely: {rca['root_cause']}\nConfidence: {rca['confidence']}\nReason: {rca['reasoning']}"
+                response_text += f"\n\n🔍 Root Cause: {rca['root_cause']} ({rca['confidence']})"
 
             return jsonify({
                 "session_id": session_id,
@@ -209,14 +251,20 @@ def ask():
         })
 
     # ----------------------------
-    # NORMAL CHAT
+    # NORMAL FLOW
     # ----------------------------
     session["history"].append(message)
 
     detected = detect_issues(message)
     session["issues"] = list(set(session["issues"] + detected))
 
-    ai_data = ai_next_steps(session["issues"], session["history"])
+    memory_hint = get_memory_insights(session["issues"][0])
+
+    ai_data = ai_next_steps(
+        session["issues"],
+        session["history"],
+        memory_hint=memory_hint
+    )
 
     return jsonify({
         "session_id": session_id,
