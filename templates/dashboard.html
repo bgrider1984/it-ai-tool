@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Dashboard</title>
+
+<style>
+body {
+    margin:0;
+    font-family:Arial;
+    background:#0b1220;
+    color:white;
+    display:flex;
+}
+
+.sidebar {
+    width:220px;
+    background:#111827;
+    height:100vh;
+    padding:15px;
+}
+
+.main {
+    flex:1;
+    padding:20px;
+}
+
+#chat {
+    height:70vh;
+    overflow-y:auto;
+    background:#111827;
+    padding:10px;
+    border-radius:10px;
+}
+
+.msg {
+    margin:10px 0;
+    padding:10px;
+    border-radius:8px;
+}
+
+.user { background:#2563eb; }
+.bot { background:#374151; }
+
+input, button {
+    padding:10px;
+    border:none;
+    border-radius:6px;
+}
+
+button {
+    background:#22c55e;
+    color:white;
+}
+</style>
+</head>
+
+<body>
+
+<div class="sidebar">
+<h3>IT Copilot</h3>
+<a href="/logout" style="color:white;">Logout</a>
+</div>
+
+<div class="main">
+
+<h2>Dashboard</h2>
+
+<div id="chat"></div>
+
+<input id="input" placeholder="Ask IT issue" style="width:70%;">
+<button onclick="send()">Send</button>
+
+</div>
+
+<script>
+
+function add(text, cls){
+    const div = document.createElement("div");
+    div.className = "msg " + cls;
+    div.textContent = text;
+    chat.appendChild(div);
+}
+
+async function send(){
+    const msg = input.value;
+    add(msg,"user");
+
+    const res = await fetch("/ask", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({message: msg})
+    });
+
+    const data = await res.json();
+    add(data.response,"bot");
+}
+</script>
+
+</body>
+</html>
