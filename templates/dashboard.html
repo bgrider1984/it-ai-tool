@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="UTF-8">
 <title>IT Copilot Dashboard</title>
 
 <style>
@@ -22,29 +23,31 @@ body {
 
 .sidebar h2 {
     font-size:18px;
-    margin-bottom:10px;
 }
 
-/* MAIN AREA */
+.sidebar button {
+    width:100%;
+    margin-top:10px;
+    padding:10px;
+    background:#22c55e;
+    border:none;
+    color:white;
+    border-radius:6px;
+}
+
+/* MAIN */
 .main {
     flex:1;
     padding:20px;
 }
 
-.header {
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-}
-
-/* CHAT BOX */
+/* CHAT */
 #chat {
     height:70vh;
     overflow-y:auto;
     background:#111827;
     padding:10px;
     border-radius:10px;
-    margin-top:15px;
 }
 
 .msg {
@@ -52,7 +55,6 @@ body {
     padding:10px;
     border-radius:8px;
     max-width:80%;
-    word-wrap:break-word;
 }
 
 .user {
@@ -64,11 +66,11 @@ body {
     background:#374151;
 }
 
-/* INPUT AREA */
+/* INPUT */
 .input-row {
     display:flex;
-    margin-top:10px;
     gap:10px;
+    margin-top:10px;
 }
 
 input {
@@ -78,25 +80,12 @@ input {
     border-radius:6px;
 }
 
-button {
-    padding:10px 15px;
-    border:none;
-    border-radius:6px;
+button.send {
     background:#22c55e;
+    border:none;
     color:white;
-    cursor:pointer;
-}
-
-button:hover {
-    background:#16a34a;
-}
-
-.upgrade {
-    background:#f59e0b;
-}
-
-.upgrade:hover {
-    background:#d97706;
+    padding:10px 15px;
+    border-radius:6px;
 }
 </style>
 </head>
@@ -105,36 +94,52 @@ button:hover {
 
 <div class="sidebar">
     <h2>🧠 IT Copilot</h2>
-    <p>Tier 2 Assistant</p>
+    <p>Beta System</p>
+
+    <button onclick="generateInvite()">Generate Invite</button>
+    <p id="inviteBox"></p>
+
     <hr>
     <a href="/logout" style="color:white;">Logout</a>
 </div>
 
 <div class="main">
 
-<div class="header">
-    <h2>Dashboard</h2>
-
-    <!-- STRIPE UPGRADE BUTTON -->
-    <button class="upgrade" onclick="upgrade()">Upgrade Pro</button>
-</div>
+<h2>Dashboard</h2>
 
 <div id="chat"></div>
 
 <div class="input-row">
-    <input id="input" placeholder="Describe your IT issue..." />
-    <button onclick="send()">Send</button>
+    <input id="input" placeholder="Describe your issue..." />
+    <button class="send" onclick="send()">Send</button>
 </div>
 
 </div>
 
 <script>
 
-function add(text, type){
+function add(text, type, rawResponse=null){
+
     const div = document.createElement("div");
     div.className = "msg " + type;
     div.textContent = text;
-    document.getElementById("chat").appendChild(div);
+
+    if(type === "bot"){
+
+        const btn1 = document.createElement("button");
+        btn1.innerText = "👍 Helpful";
+        btn1.onclick = () => feedback(text, true);
+
+        const btn2 = document.createElement("button");
+        btn2.innerText = "👎 Not Helpful";
+        btn2.onclick = () => feedback(text, false);
+
+        div.appendChild(document.createElement("br"));
+        div.appendChild(btn1);
+        div.appendChild(btn2);
+    }
+
+    chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
 }
 
@@ -157,19 +162,29 @@ async function send(){
     add(data.response,"bot");
 }
 
-async function upgrade(){
+async function feedback(response, helpful){
 
-    const res = await fetch("/create-checkout-session", {
+    await fetch("/feedback", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+            message: input.value,
+            response: response,
+            helpful: helpful
+        })
+    });
+}
+
+async function generateInvite(){
+
+    const res = await fetch("/admin/invite", {
         method:"POST"
     });
 
     const data = await res.json();
 
-    if(data.url){
-        window.location.href = data.url;
-    } else {
-        alert("Unable to start checkout");
-    }
+    document.getElementById("inviteBox").innerText =
+        "Invite Code: " + data.invite;
 }
 
 </script>
