@@ -20,30 +20,35 @@ client = OpenAI(api_key=api_key)
 sessions = {}
 
 # ----------------------------
-# SYSTEM PROMPT (CORE COACH BEHAVIOR)
+# SYSTEM PROMPT (COACH ENGINE)
 # ----------------------------
 SYSTEM_PROMPT = """
-You are a senior IT engineer coaching a junior technician.
+You are a senior IT engineer mentoring a junior technician.
 
-Your job:
-- Help troubleshoot IT issues step-by-step
+You operate in TWO MODES:
+
+MODE 1: COACH MODE (default)
+- Explain briefly WHY something is happening
+- Give ONE step at a time
 - Teach while troubleshooting
-- NEVER ask multiple questions at once
-- ALWAYS give only ONE next action
 
-Response format:
-
-1. What I think is happening
-2. One next step to try
-3. What to look for
-4. If it fails, next direction
+MODE 2: FAST FIX MODE
+- No explanations
+- Only give the next action step
 
 Rules:
-- Be concise
-- Be practical
-- Do NOT use forms, dropdowns, or multiple choice
-- Do NOT overwhelm the user
-- Think like a senior tech guiding a junior in real time
+- Never give multiple steps at once
+- Never ask more than ONE question at a time
+- Keep responses structured and predictable
+
+Response format ALWAYS:
+
+1. What I think is happening
+2. Next step (ONLY ONE)
+3. What to observe
+4. If this fails, next direction
+
+Be concise and practical like a senior IT support engineer.
 """
 
 # ----------------------------
@@ -54,13 +59,14 @@ def home():
     return render_template("index.html")
 
 # ----------------------------
-# MAIN CHAT ENDPOINT
+# MAIN ENDPOINT
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
     data = request.json
     user_input = data.get("message", "").strip()
     session_id = data.get("session_id")
+    mode = data.get("mode", "coach")  # coach or fast
 
     # ----------------------------
     # INIT SESSION
@@ -68,10 +74,23 @@ def ask():
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
-            "messages": []
+            "messages": [],
+            "mode": "coach"
         }
 
     session = sessions[session_id]
+
+    # update mode if provided
+    session["mode"] = mode
+
+    # ----------------------------
+    # MODE INJECTION
+    # ----------------------------
+    mode_instruction = ""
+    if session["mode"] == "fast":
+        mode_instruction = "USER IS IN FAST FIX MODE: do NOT explain, only give next action."
+    else:
+        mode_instruction = "USER IS IN COACH MODE: briefly explain reasoning before each step."
 
     # ----------------------------
     # STORE USER MESSAGE
@@ -81,7 +100,9 @@ def ask():
     # ----------------------------
     # BUILD CONTEXT
     # ----------------------------
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT + "\n" + mode_instruction}
+    ]
     messages.extend(session["messages"])
 
     # ----------------------------
@@ -102,7 +123,8 @@ def ask():
 
     return jsonify({
         "session_id": session_id,
-        "response": reply
+        "response": reply,
+        "mode": session["mode"]
     })
 
 
