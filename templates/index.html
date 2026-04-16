@@ -96,8 +96,13 @@
 </div>
 
 <script>
-let chatHistory = [];
 
+let chatHistory = [];
+let sessionId = null; // 🔥 CRITICAL FIX
+
+// ----------------------------
+// SEND MESSAGE
+// ----------------------------
 async function sendMessage(textOverride = null) {
     const input = document.getElementById("msg");
     const text = textOverride || input.value;
@@ -118,12 +123,18 @@ async function sendMessage(textOverride = null) {
         headers: {
             "Content-Type": "application/json"
         },
-        body: JSON.stringify({ history: chatHistory })
+        body: JSON.stringify({
+            message: text,
+            session_id: sessionId   // 🔥 FIX: persist session
+        })
     });
 
     const data = await res.json();
 
     console.log("FULL RESPONSE:", data);
+
+    // 🔥 SAVE SESSION ID FROM BACKEND
+    sessionId = data.session_id;
 
     addMessage("bot", data.response);
 
@@ -135,6 +146,9 @@ async function sendMessage(textOverride = null) {
     renderOptions(data.options || []);
 }
 
+// ----------------------------
+// ADD MESSAGE
+// ----------------------------
 function addMessage(role, text) {
     const chat = document.getElementById("chat");
 
@@ -146,46 +160,21 @@ function addMessage(role, text) {
     chat.scrollTop = chat.scrollHeight;
 }
 
+// ----------------------------
+// RENDER OPTIONS
+// ----------------------------
 function renderOptions(options) {
     const container = document.getElementById("options");
     container.innerHTML = "";
 
     if (!options || options.length === 0) return;
 
-    // ----------------------------
-    // NORMALIZATION (fix duplicates & variants)
-    // ----------------------------
-    const normalize = (text) => {
-        return text
-            .toLowerCase()
-            .replace(/\./g, "")
-            .replace(/'/g, "")
-            .trim();
-    };
+    const uniqueOptions = [...new Set(options)];
 
-    // ----------------------------
-    // REMOVE ALL UNCERTAINTY VARIANTS
-    // ----------------------------
-    const cleaned = options.filter(opt => {
-        const n = normalize(opt);
-
-        return !(
-            n === "i am not sure" ||
-            n === "im not sure" ||
-            n === "not sure" ||
-            n === "unsure"
-        );
-    });
-
-    // ----------------------------
-    // DEDUP OPTIONS
-    // ----------------------------
-    const uniqueOptions = [...new Set(cleaned)];
-
-    // ----------------------------
-    // ADD SINGLE CONTROLLED OPTION
-    // ----------------------------
-    uniqueOptions.push("I am not sure");
+    const extendedOptions = [
+        ...uniqueOptions.filter(opt => opt !== "I am not sure"),
+        "I am not sure"
+    ];
 
     const select = document.createElement("select");
 
@@ -194,7 +183,7 @@ function renderOptions(options) {
     defaultOpt.value = "";
     select.appendChild(defaultOpt);
 
-    uniqueOptions.forEach(opt => {
+    extendedOptions.forEach(opt => {
         const option = document.createElement("option");
         option.value = opt;
         option.text = opt;
@@ -205,9 +194,7 @@ function renderOptions(options) {
         if (!select.value) return;
 
         if (select.value === "I am not sure") {
-            sendMessage(
-                "User is unsure. Rephrase the question in simple terms and give examples of how to answer."
-            );
+            sendMessage("User is unsure. Rephrase the question and simplify it with examples.");
         } else {
             sendMessage(select.value);
         }
@@ -217,6 +204,7 @@ function renderOptions(options) {
 
     container.appendChild(select);
 }
+
 </script>
 
 </body>
