@@ -1,131 +1,99 @@
 import os
 import uuid
+import json
 from flask import Flask, render_template, request, jsonify
+from openai import OpenAI
 
 app = Flask(__name__)
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 sessions = {}
 
 # ----------------------------
-# ISSUE DETECTION
+# SESSION INIT
 # ----------------------------
-def detect_issue(text):
-    t = text.lower()
-
-    if "outlook" in t:
-        return "outlook"
-    if "vpn" in t:
-        return "vpn"
-    if "login" in t or "password" in t:
-        return "auth"
-    if "hot" in t or "overheating" in t:
-        return "hardware_overheating"
-    if "crash" in t or "freeze" in t or "lag" in t:
-        return "system_instability"
-
-    return "unknown"
-
-# ----------------------------
-# DIAGNOSTIC INTELLIGENCE MODEL
-# ----------------------------
-def diagnostic_model(issue, state):
-    """
-    state contains:
-    - attempt_count
-    - failed_paths
-    """
-
-    attempt = state["attempt_count"]
-    failed = state["failed_paths"]
-
-    # base reasoning profiles
-    profiles = {
-        "outlook": {
-            "software": 0.8,
-            "config": 0.7,
-            "hardware": 0.1,
-            "steps": [
-                ("safe_mode", "Start Outlook in Safe Mode"),
-                ("addins", "Disable Outlook Add-ins"),
-                ("profile", "Rebuild Outlook Profile")
-            ]
-        },
-
-        "vpn": {
-            "software": 0.6,
-            "config": 0.8,
-            "hardware": 0.1,
-            "steps": [
-                ("adapter", "Check network adapter"),
-                ("dns", "Flush DNS cache"),
-                ("reinstall", "Reinstall VPN client")
-            ]
-        },
-
-        "hardware_overheating": {
-            "software": 0.3,
-            "config": 0.2,
-            "hardware": 0.9,
-            "steps": [
-                ("process", "Check CPU usage"),
-                ("fans", "Inspect fan operation"),
-                ("thermal", "Check thermal paste / hardware health")
-            ]
-        },
-
-        "system_instability": {
-            "software": 0.6,
-            "config": 0.4,
-            "hardware": 0.6,
-            "steps": [
-                ("updates", "Check recent updates"),
-                ("safe_boot", "Boot into Safe Mode"),
-                ("event_viewer", "Check system crash logs")
-            ]
-        },
-
-        "unknown": {
-            "software": 0.5,
-            "config": 0.5,
-            "hardware": 0.5,
-            "steps": [
-                ("gather", "Gather more detailed symptoms"),
-                ("isolate", "Isolate when issue occurs"),
-                ("diagnose", "Run full system diagnostics")
-            ]
+def get_session(session_id):
+    if not session_id or session_id not in sessions:
+        session_id = str(uuid.uuid4())
+        sessions[session_id] = {
+            "history": [],
+            "issue": None,
+            "failed_steps": []
         }
-    }
-
-    profile = profiles.get(issue, profiles["unknown"])
-
-    steps = profile["steps"]
-
-    # remove failed steps from priority
-    for f in failed:
-        steps = [s for s in steps if s[0] != f]
-
-    if attempt >= len(steps):
-        return {
-            "message": "Escalation required: deeper system-level diagnosis needed.",
-            "step": None
-        }
-
-    step = steps[attempt]
-
-    return {
-        "message": step[1],
-        "step": step[0],
-        "confidence": profile
-    }
+    return session_id, sessions[session_id]
 
 # ----------------------------
 # INTENT SWITCH DETECTION
 # ----------------------------
-def is_new_issue(prev, message):
+def is_new_issue(prev_issue, message):
     triggers = ["new issue", "actually", "different", "instead", "switch", "forget"]
-    if prev is None:
+    if prev_issue is None:
         return True
     return any(t in message.lower() for t in triggers)
+
+# ----------------------------
+# TIER 2 AI ENGINE
+# ----------------------------
+def ai_copilot(issue, history, failed_steps):
+
+    prompt = f"""
+You are a Tier 2 IT support engineer.
+
+Your job:
+- Diagnose the issue
+- Avoid repeating failed steps
+- Escalate intelligently if needed
+
+User issue context:
+{issue}
+
+Conversation history:
+{history}
+
+Failed steps (DO NOT REPEAT THESE):
+{failed_steps}
+
+Return ONLY valid JSON:
+
+{{
+  "issue_summary": "short interpretation of the problem",
+  "likely_cause": "what is probably happening",
+  "confidence": "low|medium|high",
+  "steps": [
+    {{
+      "id": "step_name",
+      "action": "what to do",
+      "why": "why this step is being done"
+    }}
+  ],
+  "escalation": "when to escalate"
+}}
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+        max_tokens=600
+    )
+
+    try:
+        return json.loads(response.choices[0].message.content)
+    except:
+        return {
+            "issue_summary": "Unable to parse issue",
+            "likely_cause": "Unknown",
+            "confidence": "low",
+            "steps": [
+                {
+                    "id": "basic_restart",
+                    "action": "Restart the system",
+                    "why": "Reset state to clear transient issues"
+                }
+            ],
+            "escalation": "If issue persists, escalate to Tier 3"
+        }
 
 # ----------------------------
 # ROUTE
@@ -136,46 +104,37 @@ def home():
 
 @app.route("/ask", methods=["POST"])
 def ask():
+
     data = request.json
 
     session_id = data.get("session_id")
     message = data.get("message", "")
 
-    if not session_id or session_id not in sessions:
-        session_id = str(uuid.uuid4())
-        sessions[session_id] = {
-            "issue": None,
-            "attempt_count": 0,
-            "last_message": None,
-            "failed_paths": []
-        }
-
-    session = sessions[session_id]
-
-    issue = detect_issue(message)
+    session_id, session = get_session(session_id)
 
     # ----------------------------
-    # INTENT SWITCH RESET
+    # INTENT RESET
     # ----------------------------
-    if is_new_issue(session["last_message"], message) or issue != session["issue"]:
-        session["attempt_count"] = 0
-        session["failed_paths"] = []
-        session["issue"] = issue
-    else:
-        session["attempt_count"] += 1
+    if is_new_issue(session["issue"], message):
+        session["history"] = []
+        session["failed_steps"] = []
 
-    session["last_message"] = message
+    session["history"].append(message)
 
     # ----------------------------
-    # DIAGNOSTIC RESPONSE
+    # AI CALL
     # ----------------------------
-    result = diagnostic_model(issue, session)
+    result = ai_copilot(
+        issue=message,
+        history=session["history"],
+        failed_steps=session["failed_steps"]
+    )
+
+    session["issue"] = result["issue_summary"]
 
     return jsonify({
         "session_id": session_id,
-        "response": result["message"],
-        "step": session["attempt_count"],
-        "issue": issue
+        "response": result,
     })
 
 
