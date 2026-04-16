@@ -24,16 +24,28 @@ try:
 except Exception:
     knowledge_base = []
 
+import numpy as np
+
+def simple_similarity(a, b):
+    a_words = set(a.lower().split())
+    b_words = set(b.lower().split())
+    return len(a_words & b_words) / max(len(a_words), 1)
+
 def find_relevant_knowledge(user_input):
-    user_input = user_input.lower()
-    matches = []
+    scored = []
 
     for item in knowledge_base:
-        for keyword in item.get("keywords", []):
-            if keyword in user_input:
-                matches.append(item.get("content", ""))
+        content = item.get("content", "")
+        keywords = " ".join(item.get("keywords", []))
 
-    return "\n".join(matches[:3])
+        score = simple_similarity(user_input, keywords + " " + content)
+
+        if score > 0:
+            scored.append((score, content))
+
+    scored.sort(reverse=True, key=lambda x: x[0])
+
+    return "\n".join([x[1] for x in scored[:3]])
 
 # ----------------------------
 # System Prompt
