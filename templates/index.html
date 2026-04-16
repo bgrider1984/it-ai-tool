@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>IT Help Desk Copilot</title>
+<title>IT Copilot</title>
 
 <style>
 body {
@@ -19,7 +19,7 @@ body {
 }
 
 #chat {
-    height:70vh;
+    height:60vh;
     overflow-y:auto;
     background:#111827;
     padding:15px;
@@ -38,14 +38,11 @@ body {
 .user {
     background:#2563eb;
     align-self:flex-end;
-    max-width:80%;
 }
 
 .bot {
     background:#374151;
     align-self:flex-start;
-    max-width:95%;
-    line-height:1.4;
 }
 
 .inputArea {
@@ -59,7 +56,6 @@ input {
     padding:10px;
     border-radius:8px;
     border:none;
-    font-size:14px;
 }
 
 button {
@@ -70,15 +66,38 @@ button {
     color:white;
     cursor:pointer;
 }
+
+/* SMART SUGGESTIONS */
+#suggestions {
+    display:flex;
+    gap:8px;
+    margin-top:10px;
+    flex-wrap:wrap;
+}
+
+.suggest {
+    background:#1f2937;
+    border:1px solid #374151;
+    padding:6px 10px;
+    border-radius:6px;
+    cursor:pointer;
+    font-size:13px;
+}
+
+.suggest:hover {
+    background:#374151;
+}
 </style>
 </head>
 
 <body>
 
 <div class="container">
-<h2>IT Help Desk Copilot</h2>
+<h2>IT Copilot</h2>
 
 <div id="chat"></div>
+
+<div id="suggestions"></div>
 
 <div class="inputArea">
 <input id="input" placeholder="Describe the issue..." />
@@ -92,11 +111,85 @@ let sessionId = localStorage.getItem("sessionId");
 
 const chat = document.getElementById("chat");
 const input = document.getElementById("input");
+const suggestions = document.getElementById("suggestions");
 
-input.addEventListener("keydown", e => {
-    if(e.key === "Enter") send();
-});
+/* ----------------------------
+   INTENT DETECTION (FAST LOCAL)
+---------------------------- */
+function detectContext(text){
 
+    text = text.toLowerCase();
+
+    if(text.includes("vpn") || text.includes("network") || text.includes("wifi")){
+        return "network_vpn";
+    }
+
+    if(text.includes("outlook") || text.includes("email")){
+        return "outlook";
+    }
+
+    if(text.includes("slow") || text.includes("crash") || text.includes("freeze")){
+        return "performance";
+    }
+
+    if(text.includes("login") || text.includes("password")){
+        return "auth";
+    }
+
+    return null;
+}
+
+/* ----------------------------
+   SMART SUGGESTIONS
+---------------------------- */
+function renderSuggestions(text){
+
+    const ctx = detectContext(text);
+
+    suggestions.innerHTML = "";
+
+    if(!ctx) return;
+
+    const map = {
+        network_vpn: [
+            { label:"Reset VPN", action:"vpn reset" },
+            { label:"Flush DNS", action:"flush dns" },
+            { label:"Network Repair", action:"network repair" }
+        ],
+        outlook: [
+            { label:"Safe Mode Start", action:"outlook safe mode" },
+            { label:"Repair Profile", action:"repair outlook profile" },
+            { label:"Reset Cache", action:"reset outlook cache" }
+        ],
+        performance: [
+            { label:"Check Task Manager", action:"high cpu check" },
+            { label:"Disable Startup Apps", action:"startup cleanup" },
+            { label:"Check Disk Health", action:"disk check" }
+        ],
+        auth: [
+            { label:"Reset Password", action:"password reset flow" },
+            { label:"Clear Credentials", action:"clear cached login" }
+        ]
+    };
+
+    (map[ctx] || []).forEach(item => {
+
+        const b = document.createElement("div");
+        b.className = "suggest";
+        b.textContent = item.label;
+
+        b.onclick = () => {
+            input.value = item.action;
+            send(ctx); // send with context
+        };
+
+        suggestions.appendChild(b);
+    });
+}
+
+/* ----------------------------
+   CHAT UI
+---------------------------- */
 function add(text, cls){
     const div = document.createElement("div");
     div.className = "msg " + cls;
@@ -105,20 +198,27 @@ function add(text, cls){
     chat.scrollTop = chat.scrollHeight;
 }
 
-async function send(){
+/* ----------------------------
+   SEND
+---------------------------- */
+async function send(contextOverride=null){
 
     const msg = input.value.trim();
     if(!msg) return;
 
+    const context = contextOverride || detectContext(msg);
+
     add(msg, "user");
     input.value = "";
+    suggestions.innerHTML = "";
 
     const res = await fetch("/ask", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
             message: msg,
-            session_id: sessionId
+            session_id: sessionId,
+            context: context
         })
     });
 
@@ -129,6 +229,17 @@ async function send(){
 
     add(data.response, "bot");
 }
+
+/* ----------------------------
+   LIVE INPUT LISTENER
+---------------------------- */
+input.addEventListener("input", () => {
+    renderSuggestions(input.value);
+});
+
+input.addEventListener("keydown", e => {
+    if(e.key === "Enter") send();
+});
 
 </script>
 
