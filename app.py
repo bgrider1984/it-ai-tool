@@ -24,11 +24,11 @@ def find_relevant_knowledge(user_input):
     matches = []
 
     for item in knowledge_base:
-        for keyword in item["keywords"]:
+        for keyword in item.get("keywords", []):
             if keyword in user_input:
-                matches.append(item["content"])
+                matches.append(item.get("content", ""))
 
-    return "\n".join(matches[:3])  # top 3 matches
+    return "\n".join(matches[:3])  # limit to top 3 matches
 
 # ----------------------------
 # System Prompt (IT Copilot Behavior)
@@ -63,12 +63,12 @@ Avoid generic advice.
 def home():
     return render_template("index.html")
 
-
 @app.route("/ask", methods=["POST"])
 def ask():
     try:
         user_input = request.json.get("message", "")
 
+        # 🔍 Get relevant knowledge
         knowledge = find_relevant_knowledge(user_input)
 
         messages = [
@@ -85,17 +85,42 @@ Relevant Internal Knowledge:
             }
         ]
 
+        # 🤖 OpenAI call
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
+            max_tokens=400,
             messages=messages
         )
 
+        reply = response.choices[0].message.content
+
+        # 📊 Token usage
+        usage = response.usage
+        prompt_tokens = usage.prompt_tokens
+        completion_tokens = usage.completion_tokens
+        total_tokens = usage.total_tokens
+
+        # 💰 Cost calculation (approx)
+        input_cost = prompt_tokens * 0.0000004
+        output_cost = completion_tokens * 0.0000016
+        total_cost = input_cost + output_cost
+
+        print(f"Tokens: {total_tokens} | Cost: ${total_cost:.6f}")
+
         return jsonify({
-            "response": response.choices[0].message.content
+            "response": reply,
+            "tokens": total_tokens,
+            "cost": round(total_cost, 6)
         })
 
     except Exception as e:
-        print("ERROR:", str(e))  # shows in Render logs
+        print("ERROR:", str(e))
         return jsonify({
             "response": f"Server Error: {str(e)}"
         }), 500
+
+# ----------------------------
+# Run App
+# ----------------------------
+if __name__ == "__main__":
+    app.run(debug=True)
