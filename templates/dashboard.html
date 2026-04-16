@@ -2,51 +2,70 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Dashboard</title>
+<title>IT Copilot Dashboard v2</title>
 
 <style>
 body {
     margin:0;
-    font-family:Arial;
+    font-family: Arial;
     background:#0b1220;
     color:white;
     display:flex;
-}
-
-.sidebar {
-    width:220px;
-    background:#111827;
     height:100vh;
-    padding:15px;
 }
 
+/* SIDEBAR */
+.sidebar {
+    width:280px;
+    background:#111827;
+    padding:15px;
+    overflow-y:auto;
+}
+
+.session {
+    padding:10px;
+    margin:5px 0;
+    background:#1f2937;
+    border-radius:6px;
+    cursor:pointer;
+}
+
+.session:hover {
+    background:#374151;
+}
+
+/* MAIN */
 .main {
     flex:1;
-    padding:20px;
+    display:flex;
+    flex-direction:column;
+}
+
+.header {
+    padding:10px;
+    background:#111827;
 }
 
 #chat {
-    height:70vh;
+    flex:1;
     overflow-y:auto;
-    background:#111827;
-    padding:10px;
-    border-radius:10px;
+    padding:15px;
 }
 
 .msg {
     margin:10px 0;
     padding:10px;
     border-radius:8px;
-    max-width:80%;
+    max-width:70%;
 }
 
 .user { background:#2563eb; margin-left:auto; }
 .bot { background:#374151; }
 
-.input-row {
+.input-area {
     display:flex;
-    gap:10px;
-    margin-top:10px;
+    padding:10px;
+    background:#111827;
 }
 
 input {
@@ -57,11 +76,13 @@ input {
 }
 
 button {
+    margin-left:10px;
     padding:10px 15px;
+    background:#22c55e;
     border:none;
     border-radius:6px;
-    background:#22c55e;
     color:white;
+    cursor:pointer;
 }
 </style>
 </head>
@@ -69,18 +90,20 @@ button {
 <body>
 
 <div class="sidebar">
-    <h2>IT Copilot</h2>
-    <a href="/logout" style="color:white;">Logout</a>
+    <h3>Sessions</h3>
+    <div id="sessions"></div>
 </div>
 
 <div class="main">
 
-<h2>Dashboard</h2>
+<div class="header">
+    <h3>IT Copilot</h3>
+</div>
 
 <div id="chat"></div>
 
-<div class="input-row">
-    <input id="input" placeholder="Ask IT issue..." />
+<div class="input-area">
+    <input id="input" placeholder="Ask IT issue...">
     <button onclick="send()">Send</button>
 </div>
 
@@ -88,34 +111,76 @@ button {
 
 <script>
 
-function add(text, type){
+let currentSession = null;
+
+function add(text, cls){
     const div = document.createElement("div");
-    div.className = "msg " + type;
+    div.className = "msg " + cls;
     div.textContent = text;
-    chat.appendChild(div);
-    chat.scrollTop = chat.scrollHeight;
+    document.getElementById("chat").appendChild(div);
 }
 
-async function send(){
+async function loadSessions(){
 
-    const msg = document.getElementById("input").value.trim();
-    if(!msg) return;
+    const res = await fetch("/sessions", {credentials:"include"});
+    const data = await res.json();
 
-    add(msg,"user");
+    const container = document.getElementById("sessions");
+    container.innerHTML = "";
 
-    document.getElementById("input").value = "";
+    data.forEach(s => {
+        const div = document.createElement("div");
+        div.className = "session";
+        div.textContent = s.title;
+        div.onclick = () => loadSession(s.session_id);
+        container.appendChild(div);
+    });
+}
 
-    const res = await fetch("/ask", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        credentials: "include",
-        body:JSON.stringify({message: msg})
+async function loadSession(sid){
+
+    currentSession = sid;
+
+    const res = await fetch("/load_session/" + sid, {
+        credentials:"include"
     });
 
     const data = await res.json();
 
-    add(data.response || data.error, "bot");
+    const chat = document.getElementById("chat");
+    chat.innerHTML = "";
+
+    data.forEach(m => {
+        add(m.message, m.role === "user" ? "user" : "bot");
+    });
 }
+
+async function send(){
+
+    const input = document.getElementById("input");
+    const msg = input.value;
+    input.value = "";
+
+    add(msg, "user");
+
+    const res = await fetch("/ask", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        credentials:"include",
+        body: JSON.stringify({
+            message: msg,
+            session_id: currentSession
+        })
+    });
+
+    const data = await res.json();
+
+    add(data.response, "bot");
+
+    loadSessions();
+}
+
+loadSessions();
 
 </script>
 
