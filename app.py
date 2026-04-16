@@ -1,45 +1,81 @@
 import os
 import uuid
+import time
 from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
 
 app = Flask(__name__)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-sessions = {}
+# ----------------------------
+# SAAS USERS (replace later with DB)
+# ----------------------------
+USERS = {
+    "demo-key-123": {
+        "name": "Demo User",
+        "plan": "free",
+        "requests": []
+    }
+}
+
+# ----------------------------
+# SESSIONS
+# ----------------------------
+SESSIONS = {}
+
+# ----------------------------
+# RATE LIMIT CONFIG
+# ----------------------------
+LIMIT_PER_MINUTE = 30
+
+def rate_limit(user):
+    now = time.time()
+    window = 60
+
+    user["requests"] = [t for t in user["requests"] if now - t < window]
+
+    if len(user["requests"]) >= LIMIT_PER_MINUTE:
+        return False
+
+    user["requests"].append(now)
+    return True
+
+# ----------------------------
+# GET USER
+# ----------------------------
+def get_user(api_key):
+    return USERS.get(api_key)
 
 # ----------------------------
 # SESSION
 # ----------------------------
 def get_session(session_id):
-    if not session_id or session_id not in sessions:
+    if not session_id or session_id not in SESSIONS:
         session_id = str(uuid.uuid4())
-        sessions[session_id] = {
-            "history": [],
-            "context": None
+        SESSIONS[session_id] = {
+            "history": []
         }
-    return session_id, sessions[session_id]
+    return session_id, SESSIONS[session_id]
 
 # ----------------------------
-# CONTEXT-AWARE AI ENGINE
+# CORE AI ENGINE
 # ----------------------------
-def generate_response(message, context, history):
+def generate_response(message, history):
 
     prompt = f"""
-You are a FAST Tier 2 IT Help Desk Copilot.
+You are a FAST Tier 2 IT Copilot for junior technicians.
 
-You may be given a context hint to improve accuracy.
+Rules:
+- Be extremely concise
+- First give MOST likely fix
+- Then 2-4 backup steps
+- No fluff
 
-Context hint: {context}
+Format:
 
-RULES:
-- Be concise
-- Prioritize fastest fix first
-- Max 3–5 steps
-- Format as:
-  🔴 Try this first
-  🟡 If that doesn't work
-  🔵 If still broken
+🔴 Most likely fix:
+🟡 If that doesn't work:
+🔵 If still broken:
 
 Issue:
 {message}
@@ -69,27 +105,46 @@ def ask():
 
     data = request.json
 
-    session_id = data.get("session_id")
+    api_key = data.get("api_key")
     message = data.get("message", "")
-    context = data.get("context", None)
+    session_id = data.get("session_id")
+
+    user = get_user(api_key)
+
+    if not user:
+        return jsonify({"error": "Invalid API key"}), 403
+
+    if not rate_limit(user):
+        return jsonify({"error": "Rate limit exceeded"}), 429
 
     session_id, session = get_session(session_id)
 
     session["history"].append(message)
 
-    # store context if provided
-    if context:
-        session["context"] = context
-
-    reply = generate_response(
-        message=message,
-        context=session["context"],
-        history=session["history"]
-    )
+    response = generate_response(message, session["history"])
 
     return jsonify({
         "session_id": session_id,
-        "response": reply
+        "response": response,
+        "plan": user["plan"]
+    })
+
+
+# ----------------------------
+# SIMPLE USAGE STATS (FOR SAAS)
+# ----------------------------
+@app.route("/stats", methods=["POST"])
+def stats():
+
+    api_key = request.json.get("api_key")
+    user = get_user(api_key)
+
+    if not user:
+        return jsonify({"error": "invalid"}), 403
+
+    return jsonify({
+        "requests_used": len(user["requests"]),
+        "plan": user["plan"]
     })
 
 
