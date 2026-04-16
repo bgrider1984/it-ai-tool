@@ -5,11 +5,23 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
+# ----------------------------
+# OPENAI
+# ----------------------------
 api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise RuntimeError("Missing OPENAI_API_KEY")
+
 client = OpenAI(api_key=api_key)
 
+# ----------------------------
+# SESSION STORE (in-memory)
+# ----------------------------
 sessions = {}
 
+# ----------------------------
+# FLOW DEFINITION (STRICT WIZARD)
+# ----------------------------
 FLOW = {
     "device": {
         "question": "What type of device are you using?",
@@ -27,7 +39,7 @@ FLOW = {
         "next": "duration"
     },
     "duration": {
-        "question": "How long has this been happening?",
+        "question": "How long has this issue been happening?",
         "options": ["Just started", "A few days", "Weeks or longer"],
         "next": "error"
     },
@@ -35,20 +47,19 @@ FLOW = {
         "question": "Do you see any error messages?",
         "options": ["Yes", "No"],
         "next": "final"
-    },
-    "final": {
-        "question": "",
-        "options": [],
-        "next": None
     }
 }
 
-
+# ----------------------------
+# HOME
+# ----------------------------
 @app.route("/")
 def home():
     return render_template("index.html")
 
-
+# ----------------------------
+# MAIN ENDPOINT
+# ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
     data = request.json
@@ -56,7 +67,7 @@ def ask():
     session_id = data.get("session_id")
 
     # ----------------------------
-    # INIT SESSION
+    # CREATE SESSION
     # ----------------------------
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
@@ -67,21 +78,25 @@ def ask():
         }
 
     session = sessions[session_id]
+    step = session["step"]
 
     # ----------------------------
     # STEP 1: DETECT ISSUE
     # ----------------------------
-    if session["step"] == "detect":
+    if step == "detect":
         if user_input:
             response = client.chat.completions.create(
                 model="gpt-4.1-mini",
-                max_tokens=100,
+                max_tokens=80,
                 messages=[
                     {
                         "role": "system",
-                        "content": "Classify the IT issue in a short label."
+                        "content": "Classify the IT issue in a short label (max 6 words)."
                     },
-                    {"role": "user", "content": user_input}
+                    {
+                        "role": "user",
+                        "content": user_input
+                    }
                 ]
             )
 
@@ -103,9 +118,9 @@ def ask():
         })
 
     # ----------------------------
-    # STEP 2: CONFIRM ISSUE (FIXED)
+    # STEP 2: CONFIRM ISSUE
     # ----------------------------
-    if session["step"] == "confirm_issue":
+    if step == "confirm_issue":
         if user_input.lower() == "no":
             session["step"] = "detect"
             session["issue"] = None
@@ -119,39 +134,59 @@ def ask():
         if user_input.lower() == "yes":
             session["step"] = "device"
 
-    # ----------------------------
-    # NORMAL FLOW
-    # ----------------------------
-    step = session["step"]
-    node = FLOW[step]
+            return jsonify({
+                "session_id": session_id,
+                "response": "Got it. Let's continue troubleshooting.",
+                "options": []
+            })
 
-    if user_input and step in FLOW:
-        session["answers"][step] = user_input
-
-        if node["next"]:
-            session["step"] = node["next"]
-            step = session["step"]
-            node = FLOW[step]
+        # fallback safety
+        return jsonify({
+            "session_id": session_id,
+            "response": "Please confirm: Is this correct?",
+            "options": ["Yes", "No"]
+        })
 
     # ----------------------------
-    # FINAL STEP
+    # NORMAL WIZARD FLOW
+    # ----------------------------
+    if step in FLOW:
+        node = FLOW[step]
+
+        if user_input:
+            session["answers"][step] = user_input
+
+            if node["next"]:
+                session["step"] = node["next"]
+                step = session["step"]
+                node = FLOW[step]
+
+        return jsonify({
+            "session_id": session_id,
+            "response": node["question"],
+            "options": node["options"]
+        })
+
+    # ----------------------------
+    # FINAL STEP (AI DIAGNOSIS)
     # ----------------------------
     if step == "final":
         summary = session["answers"]
 
         prompt = f"""
-Issue: {session['issue']}
+Issue: {session.get('issue')}
+
 Device: {summary.get("device")}
-Type: {summary.get("issue_type")}
+Issue Type: {summary.get("issue_type")}
 Scope: {summary.get("scope")}
 Duration: {summary.get("duration")}
-Error: {summary.get("error")}
+Error Messages: {summary.get("error")}
 
 Provide:
-- Likely causes
-- Step-by-step fix
-- Commands
-- Escalation guidance
+1. Likely causes (ranked)
+2. Step-by-step troubleshooting
+3. Useful commands if applicable
+4. Escalation guidance
 """
 
         response = client.chat.completions.create(
@@ -169,12 +204,18 @@ Provide:
             "options": []
         })
 
+    # ----------------------------
+    # SAFETY FALLBACK
+    # ----------------------------
     return jsonify({
         "session_id": session_id,
-        "response": node["question"],
-        "options": node["options"]
+        "response": "Let's continue troubleshooting.",
+        "options": []
     })
 
 
+# ----------------------------
+# RUN APP
+# ----------------------------
 if __name__ == "__main__":
     app.run(debug=True)
