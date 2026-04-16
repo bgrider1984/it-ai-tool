@@ -1,6 +1,5 @@
 import os
 import uuid
-import json
 from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
 
@@ -11,7 +10,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 sessions = {}
 
 # ----------------------------
-# SESSION INIT
+# SESSION
 # ----------------------------
 def get_session(session_id):
     if not session_id or session_id not in sessions:
@@ -19,81 +18,71 @@ def get_session(session_id):
         sessions[session_id] = {
             "history": [],
             "issue": None,
-            "failed_steps": []
+            "step_index": 0
         }
     return session_id, sessions[session_id]
 
 # ----------------------------
-# INTENT SWITCH DETECTION
+# INTENT SWITCH
 # ----------------------------
-def is_new_issue(prev_issue, message):
+def is_new_issue(prev, msg):
     triggers = ["new issue", "actually", "different", "instead", "switch", "forget"]
-    if prev_issue is None:
+    if prev is None:
         return True
-    return any(t in message.lower() for t in triggers)
+    return any(t in msg.lower() for t in triggers)
 
 # ----------------------------
-# TIER 2 AI ENGINE
+# TIER 2 ACTIONABLE ENGINE
 # ----------------------------
-def ai_copilot(issue, history, failed_steps):
+def ai_engine(issue, history):
 
     prompt = f"""
-You are a Tier 2 IT support engineer.
+You are a Tier 2 IT engineer.
 
-Your job:
-- Diagnose the issue
-- Avoid repeating failed steps
-- Escalate intelligently if needed
+Convert troubleshooting into ACTIONABLE steps.
 
-User issue context:
-{issue}
+RULES:
+- Every step MUST include instructions (click-by-click or command-by-command)
+- Never give vague steps
+- Always include expected result
+- Always include next escalation path if step fails
+- Choose a START HERE step
 
-Conversation history:
-{history}
-
-Failed steps (DO NOT REPEAT THESE):
-{failed_steps}
-
-Return ONLY valid JSON:
+Return ONLY JSON:
 
 {{
-  "issue_summary": "short interpretation of the problem",
-  "likely_cause": "what is probably happening",
+  "issue_summary": "...",
+  "likely_cause": "...",
   "confidence": "low|medium|high",
+  "start_here": 0,
   "steps": [
     {{
-      "id": "step_name",
-      "action": "what to do",
-      "why": "why this step is being done"
+      "title": "Step name",
+      "instructions": ["step 1", "step 2", "step 3"],
+      "expected": "what should happen",
+      "if_failed": "next diagnostic direction"
     }}
-  ],
-  "escalation": "when to escalate"
+  ]
 }}
+
+Issue:
+{issue}
+
+History:
+{history}
 """
 
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
-        max_tokens=600
+        max_tokens=800
     )
 
     try:
-        return json.loads(response.choices[0].message.content)
+        return response.choices[0].message.content
     except:
-        return {
-            "issue_summary": "Unable to parse issue",
-            "likely_cause": "Unknown",
-            "confidence": "low",
-            "steps": [
-                {
-                    "id": "basic_restart",
-                    "action": "Restart the system",
-                    "why": "Reset state to clear transient issues"
-                }
-            ],
-            "escalation": "If issue persists, escalate to Tier 3"
-        }
+        return None
 
 # ----------------------------
 # ROUTE
@@ -113,28 +102,25 @@ def ask():
     session_id, session = get_session(session_id)
 
     # ----------------------------
-    # INTENT RESET
+    # DETECT ISSUE
     # ----------------------------
+    issue = message  # keep raw context for AI
+
     if is_new_issue(session["issue"], message):
+        session["step_index"] = 0
         session["history"] = []
-        session["failed_steps"] = []
 
     session["history"].append(message)
+    session["issue"] = issue
 
     # ----------------------------
     # AI CALL
     # ----------------------------
-    result = ai_copilot(
-        issue=message,
-        history=session["history"],
-        failed_steps=session["failed_steps"]
-    )
-
-    session["issue"] = result["issue_summary"]
+    raw = ai_engine(issue, session["history"])
 
     return jsonify({
         "session_id": session_id,
-        "response": result,
+        "response": raw
     })
 
 
