@@ -1,3 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>IT Copilot</title>
+
+<style>
+body {
+    margin: 0;
+    font-family: Arial;
+    color: white;
+    background: #0b1220;
+}
+
+.container {
+    max-width: 900px;
+    margin: auto;
+    padding: 20px;
+}
+
+h2 {
+    text-align: center;
+}
+
+/* CHAT */
+#chat {
+    height: 70vh;
+    overflow-y: auto;
+    background: #111827;
+    border-radius: 10px;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+}
+
+.msg {
+    padding: 10px;
+    margin: 6px 0;
+    border-radius: 10px;
+    max-width: 70%;
+    white-space: pre-wrap;
+}
+
+.user {
+    background: #2563eb;
+    align-self: flex-end;
+}
+
+.bot {
+    background: #374151;
+    align-self: flex-start;
+}
+
+/* INPUT */
+.inputArea {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+input {
+    flex: 1;
+    padding: 12px;
+    border-radius: 8px;
+    border: none;
+}
+
+button {
+    padding: 12px;
+    background: #22c55e;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>IT Copilot</h2>
+
+<div id="chat"></div>
+
+<div class="inputArea">
+    <input id="input" placeholder="Describe your IT issue..." />
+    <button onclick="send()">Send</button>
+</div>
+
+</div>
+
 <script>
 
 let sessionId = localStorage.getItem("sessionId");
@@ -46,3 +138,6 @@ async function send(){
 }
 
 </script>
+
+</body>
+</html>
