@@ -22,7 +22,6 @@ h2 {
     text-align: center;
 }
 
-/* CHAT BOX */
 #chat {
     height: 70vh;
     overflow-y: auto;
@@ -33,29 +32,45 @@ h2 {
     flex-direction: column;
 }
 
-/* MESSAGE BUBBLES */
 .msg {
-    padding: 10px 12px;
+    padding: 10px;
     margin: 6px 0;
     border-radius: 10px;
     max-width: 70%;
     white-space: pre-wrap;
-    word-wrap: break-word;
 }
 
-/* USER RIGHT SIDE */
 .user {
     background: #2563eb;
     align-self: flex-end;
 }
 
-/* BOT LEFT SIDE */
 .bot {
     background: #374151;
     align-self: flex-start;
 }
 
-/* INPUT AREA */
+/* ACTION BUTTONS */
+.actions {
+    margin-top: 5px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.actionBtn {
+    background: #22c55e;
+    border: none;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.actionBtn:hover {
+    background: #16a34a;
+}
+
 .inputArea {
     display: flex;
     gap: 10px;
@@ -67,20 +82,14 @@ input {
     padding: 12px;
     border-radius: 8px;
     border: none;
-    font-size: 16px;
 }
 
 button {
-    padding: 12px 18px;
+    padding: 12px 16px;
     border: none;
-    border-radius: 8px;
     background: #22c55e;
+    border-radius: 8px;
     cursor: pointer;
-    font-weight: bold;
-}
-
-button:hover {
-    background: #16a34a;
 }
 </style>
 </head>
@@ -88,14 +97,14 @@ button:hover {
 <body>
 
 <div class="container">
-    <h2>IT Copilot</h2>
+<h2>IT Copilot</h2>
 
-    <div id="chat"></div>
+<div id="chat"></div>
 
-    <div class="inputArea">
-        <input id="input" placeholder="Describe your IT issue..." />
-        <button onclick="send()">Send</button>
-    </div>
+<div class="inputArea">
+    <input id="input" placeholder="Describe issue..." />
+    <button onclick="send()">Send</button>
+</div>
 </div>
 
 <script>
@@ -105,43 +114,64 @@ let sessionId = null;
 const chat = document.getElementById("chat");
 const input = document.getElementById("input");
 
-// FIX: Enter key support
-input.addEventListener("keydown", function(e) {
-    if (e.key === "Enter") {
+input.addEventListener("keydown", function(e){
+    if(e.key === "Enter"){
         e.preventDefault();
         send();
     }
 });
 
-function addMessage(text, type) {
+function addMessage(text, type, actions=[]){
     const div = document.createElement("div");
-    div.classList.add("msg", type);
+    div.className = "msg " + type;
     div.textContent = text;
+
     chat.appendChild(div);
+
+    // ACTION BUTTONS
+    if(actions.length > 0){
+        const wrap = document.createElement("div");
+        wrap.className = "actions";
+
+        actions.forEach(a => {
+            const btn = document.createElement("button");
+            btn.className = "actionBtn";
+            btn.innerText = a.label;
+
+            btn.onclick = () => {
+                navigator.clipboard.writeText(a.command);
+                btn.innerText = "Copied!";
+                setTimeout(() => btn.innerText = a.label, 1000);
+            };
+
+            wrap.appendChild(btn);
+        });
+
+        chat.appendChild(wrap);
+    }
+
     chat.scrollTop = chat.scrollHeight;
 }
 
-async function send() {
-    const message = input.value.trim();
-    if (!message) return;
+async function send(){
 
-    addMessage(message, "user");
-    input.value = "";
+    const msg = input.value.trim();
+    if(!msg) return;
 
-    const res = await fetch("/ask", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-            message: message,
-            session_id: sessionId
-        })
+    addMessage(msg,"user");
+    input.value="";
+
+    const res = await fetch("/ask",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({message:msg, session_id:sessionId})
     });
 
     const data = await res.json();
 
     sessionId = data.session_id;
 
-    addMessage(data.response, "bot");
+    addMessage(data.response,"bot", data.actions || []);
 }
 
 </script>
