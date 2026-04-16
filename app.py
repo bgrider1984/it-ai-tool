@@ -25,10 +25,44 @@ def detect_issues(text):
         issues.append("outlook")
     if "vpn" in t or "network" in t:
         issues.append("network")
-    if "login" in t:
-        issues.append("login")
+    if "login" in t or "password" in t:
+        issues.append("auth")
 
     return issues if issues else ["general"]
+
+# ----------------------------
+# ROOT CAUSE ENGINE
+# ----------------------------
+def analyze_root_cause(failed_fixes, issues):
+    pattern_score = {
+        "dns": 0,
+        "profile": 0,
+        "network": 0,
+        "auth": 0,
+        "outlook": 0
+    }
+
+    for fix in failed_fixes:
+        if fix in ["reset_network", "flush_dns"]:
+            pattern_score["dns"] += 2
+            pattern_score["network"] += 1
+
+        if fix in ["new_profile"]:
+            pattern_score["profile"] += 3
+
+        if fix in ["restart_outlook", "safe_mode"]:
+            pattern_score["outlook"] += 2
+
+    best = max(pattern_score, key=pattern_score.get)
+
+    if pattern_score[best] == 0:
+        return None
+
+    return {
+        "root_cause": best,
+        "confidence": "Medium" if pattern_score[best] < 3 else "High",
+        "reasoning": f"Pattern detected from failed fixes: {failed_fixes}"
+    }
 
 # ----------------------------
 # AI FIX GENERATION
@@ -44,10 +78,8 @@ History: {history}
 
     if failed_fix:
         prompt += f"""
-The previous fix FAILED: {failed_fix}
-
-Now provide the NEXT best troubleshooting step.
-Avoid repeating the same approach.
+Previous fix FAILED: {failed_fix}
+Avoid repeating same approach. Change strategy.
 """
 
     prompt += """
@@ -72,7 +104,7 @@ Return ONLY JSON:
         return json.loads(response.choices[0].message.content)
     except:
         return {
-            "message": "Try restarting the application.",
+            "message": "Try restarting Outlook.",
             "fixes": []
         }
 
@@ -82,19 +114,21 @@ Return ONLY JSON:
 def get_fix_instructions(fix):
     steps = {
         "restart_outlook": """Restart Outlook:
-1. Open Task Manager (Ctrl+Shift+Esc)
-2. End Microsoft Outlook
-3. Reopen Outlook""",
+1. Open Task Manager
+2. End Outlook
+3. Reopen""",
 
         "safe_mode": """Safe Mode:
 1. Win + R
-2. outlook.exe /safe
-3. Press Enter""",
+2. outlook.exe /safe""",
 
         "new_profile": """New Profile:
 1. Control Panel → Mail
-2. Show Profiles
-3. Add new profile"""
+2. Show Profiles → Add""",
+
+        "reset_network": """Network Reset:
+1. ncpa.cpl
+2. Disable/Enable adapter"""
     }
 
     return steps.get(fix, "No instructions available.")
@@ -123,13 +157,14 @@ def ask():
         sessions[session_id] = {
             "history": [],
             "issues": [],
+            "failed_fixes": [],
             "last_fix": None
         }
 
     session = sessions[session_id]
 
     # ----------------------------
-    # RUN FIX → SHOW INSTRUCTIONS
+    # RUN FIX
     # ----------------------------
     if fix_request:
         session["last_fix"] = fix_request
@@ -139,32 +174,34 @@ def ask():
             "session_id": session_id,
             "response": instructions,
             "fixes": [],
-            "current_fix": fix_request,
-            "ask_feedback": True
+            "ask_feedback": True,
+            "current_fix": fix_request
         })
 
     # ----------------------------
-    # FEEDBACK LOOP (AUTO CONTINUE)
+    # FEEDBACK LOOP + RCA
     # ----------------------------
     if feedback:
         fix = feedback.get("fix")
         result = feedback.get("result")
 
-        # ❌ FAILED → AUTO CONTINUE TROUBLESHOOTING
         if result == "no":
-            ai_data = ai_next_steps(
-                session["issues"],
-                session["history"],
-                failed_fix=fix
-            )
+            session["failed_fixes"].append(fix)
+
+            rca = analyze_root_cause(session["failed_fixes"], session["issues"])
+            ai_data = ai_next_steps(session["issues"], session["history"], failed_fix=fix)
+
+            response_text = "Got it — continuing troubleshooting..."
+
+            if rca:
+                response_text += f"\n\n🔍 Root Cause Analysis:\nLikely: {rca['root_cause']}\nConfidence: {rca['confidence']}\nReason: {rca['reasoning']}"
 
             return jsonify({
                 "session_id": session_id,
-                "response": "Got it — that didn’t resolve the issue. Trying next step...",
+                "response": response_text,
                 "fixes": ai_data["fixes"]
             })
 
-        # ✅ SUCCESS
         return jsonify({
             "session_id": session_id,
             "response": "Great — issue resolved 🎉",
@@ -172,7 +209,7 @@ def ask():
         })
 
     # ----------------------------
-    # NORMAL CHAT FLOW
+    # NORMAL CHAT
     # ----------------------------
     session["history"].append(message)
 
