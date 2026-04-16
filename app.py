@@ -63,34 +63,36 @@ def home():
 
 @app.route("/ask", methods=["POST"])
 def ask():
-    user_input = request.json.get("message", "")
+    try:
+        user_input = request.json.get("message", "")
 
-    knowledge = find_relevant_knowledge(user_input)
+        knowledge = find_relevant_knowledge(user_input)
 
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": f"""
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": f"""
 User Issue:
 {user_input}
 
 Relevant Internal Knowledge:
 {knowledge}
 """
-        }
-    ]
+            }
+        ]
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages
-    )
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages
+        )
 
-    return jsonify({
-        "response": response.choices[0].message.content
-    })
+        return jsonify({
+            "response": response.choices[0].message.content
+        })
 
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    except Exception as e:
+        print("ERROR:", str(e))  # shows in Render logs
+        return jsonify({
+            "response": f"Server Error: {str(e)}"
+        }), 500
