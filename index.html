@@ -144,11 +144,17 @@ function renderOptions(options) {
     const chat = document.getElementById("chat");
 
     const container = document.createElement("div");
+    container.style.margin = "10px 0";
 
     options.forEach(opt => {
         const btn = document.createElement("button");
         btn.className = "option";
         btn.innerText = opt;
+
+        btn.style.display = "block";
+        btn.style.margin = "5px 0";
+        btn.style.padding = "10px";
+        btn.style.width = "fit-content";
 
         btn.onclick = () => {
             sendMessage(opt);
