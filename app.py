@@ -1,31 +1,34 @@
-from dotenv import load_dotenv
 from pathlib import Path
 from dotenv import load_dotenv
+import os
 
+# ----------------------------
+# Load .env (bulletproof)
+# ----------------------------
 env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-import os
-print("DEBUG API KEY:", os.getenv("OPENAI_API_KEY"))
+# ----------------------------
+# Debug (safe + single check)
+# ----------------------------
+api_key = os.getenv("OPENAI_API_KEY")
+print("DEBUG API KEY LOADED:", "YES" if api_key else "NO")
 
+if not api_key:
+    raise Exception("OPENAI_API_KEY not found. Check your .env file.")
+
+# ----------------------------
+# Imports (after env load)
+# ----------------------------
 from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
 import json
 
-load_dotenv()
-
 app = Flask(__name__)
 
 # ----------------------------
-# OpenAI Client (Modern SDK)
+# OpenAI Client
 # ----------------------------
-api_key = os.getenv("OPENAI_API_KEY")
-
-print("DEBUG API KEY:", api_key)
-
-if not api_key:
-    raise Exception("OPENAI_API_KEY not loaded. Check .env file.")
-
 client = OpenAI(api_key=api_key)
 
 # ----------------------------
@@ -46,10 +49,10 @@ def find_relevant_knowledge(user_input):
             if keyword in user_input:
                 matches.append(item.get("content", ""))
 
-    return "\n".join(matches[:3])  # limit to top 3 matches
+    return "\n".join(matches[:3])
 
 # ----------------------------
-# System Prompt (IT Copilot Behavior)
+# System Prompt
 # ----------------------------
 SYSTEM_PROMPT = """
 You are a senior enterprise IT support engineer specializing in:
@@ -81,12 +84,12 @@ Avoid generic advice.
 def home():
     return render_template("index.html")
 
+
 @app.route("/ask", methods=["POST"])
 def ask():
     try:
         user_input = request.json.get("message", "")
 
-        # 🔍 Get relevant knowledge
         knowledge = find_relevant_knowledge(user_input)
 
         messages = [
@@ -103,7 +106,6 @@ Relevant Internal Knowledge:
             }
         ]
 
-        # 🤖 OpenAI call
         response = client.chat.completions.create(
             model="gpt-4.1-mini",
             max_tokens=400,
@@ -112,22 +114,22 @@ Relevant Internal Knowledge:
 
         reply = response.choices[0].message.content
 
-        # 📊 Token usage
+        # ----------------------------
+        # Usage + Cost Tracking
+        # ----------------------------
         usage = response.usage
         prompt_tokens = usage.prompt_tokens
         completion_tokens = usage.completion_tokens
-        total_tokens = usage.total_tokens
 
-        # 💰 Cost calculation (approx)
         input_cost = prompt_tokens * 0.0000004
         output_cost = completion_tokens * 0.0000016
         total_cost = input_cost + output_cost
 
-        print(f"Tokens: {total_tokens} | Cost: ${total_cost:.6f}")
+        print(f"Tokens: {usage.total_tokens} | Cost: ${total_cost:.6f}")
 
         return jsonify({
             "response": reply,
-            "tokens": total_tokens,
+            "tokens": usage.total_tokens,
             "cost": round(total_cost, 6)
         })
 
@@ -136,6 +138,7 @@ Relevant Internal Knowledge:
         return jsonify({
             "response": f"Server Error: {str(e)}"
         }), 500
+
 
 # ----------------------------
 # Run App
