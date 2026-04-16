@@ -79,25 +79,20 @@ def home():
 
 
 @app.route("/ask", methods=["POST"])
+@app.route("/ask", methods=["POST"])
 def ask():
     try:
-        user_input = request.json.get("message", "")
+        data = request.json
+        history = data.get("history", [])
 
-        knowledge = find_relevant_knowledge(user_input)
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"""
-User Issue:
-{user_input}
-
-Relevant Internal Knowledge:
-{knowledge}
-"""
-            }
-        ]
+        # Add full conversation history
+        for msg in history:
+            messages.append({
+                "role": msg["role"],
+                "content": msg["content"]
+            })
 
         response = client.chat.completions.create(
             model="gpt-4.1-mini",
@@ -107,13 +102,8 @@ Relevant Internal Knowledge:
 
         reply = response.choices[0].message.content
 
-        # ----------------------------
-        # Usage tracking
-        # ----------------------------
         usage = response.usage
         tokens = usage.total_tokens
-
-        # rough cost estimate
         cost = (usage.prompt_tokens * 0.0000004) + (usage.completion_tokens * 0.0000016)
 
         return jsonify({
