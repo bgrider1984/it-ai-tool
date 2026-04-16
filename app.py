@@ -6,7 +6,7 @@ from openai import OpenAI
 app = Flask(__name__)
 
 # ----------------------------
-# OPENAI
+# OPENAI SETUP
 # ----------------------------
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
@@ -15,12 +15,12 @@ if not api_key:
 client = OpenAI(api_key=api_key)
 
 # ----------------------------
-# SESSION STORE (in-memory)
+# SESSION STORE
 # ----------------------------
 sessions = {}
 
 # ----------------------------
-# FLOW DEFINITION (STRICT WIZARD)
+# WIZARD FLOW
 # ----------------------------
 FLOW = {
     "device": {
@@ -67,7 +67,7 @@ def ask():
     session_id = data.get("session_id")
 
     # ----------------------------
-    # CREATE SESSION
+    # INIT SESSION
     # ----------------------------
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
@@ -91,12 +91,9 @@ def ask():
                 messages=[
                     {
                         "role": "system",
-                        "content": "Classify the IT issue in a short label (max 6 words)."
+                        "content": "Classify IT issue in max 6 words."
                     },
-                    {
-                        "role": "user",
-                        "content": user_input
-                    }
+                    {"role": "user", "content": user_input}
                 ]
             )
 
@@ -118,7 +115,7 @@ def ask():
         })
 
     # ----------------------------
-    # STEP 2: CONFIRM ISSUE
+    # STEP 2: CONFIRM ISSUE (FIXED FLOW CONTINUATION)
     # ----------------------------
     if step == "confirm_issue":
         if user_input.lower() == "no":
@@ -134,13 +131,15 @@ def ask():
         if user_input.lower() == "yes":
             session["step"] = "device"
 
+            # 🔥 IMPORTANT FIX: immediately continue flow
+            node = FLOW["device"]
+
             return jsonify({
                 "session_id": session_id,
-                "response": "Got it. Let's continue troubleshooting.",
-                "options": []
+                "response": node["question"],
+                "options": node["options"]
             })
 
-        # fallback safety
         return jsonify({
             "session_id": session_id,
             "response": "Please confirm: Is this correct?",
@@ -185,7 +184,7 @@ Error Messages: {summary.get("error")}
 Provide:
 1. Likely causes (ranked)
 2. Step-by-step troubleshooting
-3. Useful commands if applicable
+3. Commands if applicable
 4. Escalation guidance
 """
 
