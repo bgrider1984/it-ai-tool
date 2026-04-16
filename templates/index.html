@@ -40,7 +40,7 @@ body {
 .bot { background:#374151; align-self:flex-start; }
 
 .fix-btn {
-    margin-top:8px;
+    margin-top:6px;
     margin-right:6px;
     padding:6px 10px;
     border:none;
@@ -103,7 +103,6 @@ button.send {
 <script>
 
 let sessionId = localStorage.getItem("sessionId");
-let currentFix = null;
 
 const chat = document.getElementById("chat");
 const input = document.getElementById("input");
@@ -112,7 +111,7 @@ input.addEventListener("keydown", e => {
     if(e.key === "Enter") send();
 });
 
-function add(text, type, fixes=[], askFeedback=false, fixName=null){
+function add(text, type, fixes=[], feedback=false, fixName=null){
     const div = document.createElement("div");
     div.className = "msg " + type;
 
@@ -127,7 +126,7 @@ function add(text, type, fixes=[], askFeedback=false, fixName=null){
         div.appendChild(btn);
     });
 
-    if(askFeedback && fixName){
+    if(feedback && fixName){
         const yes = document.createElement("button");
         yes.className = "feedback-btn";
         yes.textContent = "👍 Worked";
@@ -148,8 +147,6 @@ function add(text, type, fixes=[], askFeedback=false, fixName=null){
 }
 
 async function runFix(fix){
-    currentFix = fix;
-
     const res = await fetch("/ask", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -177,7 +174,7 @@ async function sendFeedback(fix, result){
 
     const data = await res.json();
 
-    add(data.response, "bot", data.fixes || []);
+    add(data.response, "bot", data.fixes || [], data.ask_feedback, data.current_fix);
 }
 
 async function send(){
@@ -185,7 +182,7 @@ async function send(){
     const msg = input.value.trim();
     if(!msg) return;
 
-    add(msg,"user");
+    add(msg, "user");
     input.value = "";
 
     const res = await fetch("/ask", {
@@ -202,7 +199,7 @@ async function send(){
     sessionId = data.session_id;
     localStorage.setItem("sessionId", sessionId);
 
-    add(data.response, "bot", data.fixes || []);
+    add(data.response, "bot", data.fixes || [], data.ask_feedback, data.current_fix);
 }
 
 </script>
