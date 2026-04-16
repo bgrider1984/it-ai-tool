@@ -18,55 +18,85 @@ sessions = {}
 # ----------------------------
 def detect_issue(text):
     t = text.lower()
-
     if "outlook" in t:
         return "outlook"
     if "vpn" in t or "network" in t:
         return "vpn"
     if "login" in t or "password" in t:
         return "login"
-
     return "general"
 
 # ----------------------------
-# ADAPTIVE PLAYBOOKS
+# MULTI-STEP TREE PLAYBOOKS
 # ----------------------------
 PLAYBOOKS = {
     "outlook": {
-        "steps": [
-            {
-                "ask": "Open Outlook in Safe Mode (Win+R → outlook.exe /safe). Did it open?",
-                "yes": "Add-in issue. Disable all add-ins and restart Outlook normally.",
-                "no": "Possible profile issue. Create a new Outlook profile via Control Panel."
+        "start": "safe_mode",
+        "nodes": {
+            "safe_mode": {
+                "question": "Open Outlook in Safe Mode (Win+R → outlook.exe /safe). Did it open?",
+                "yes": "disable_addins",
+                "no": "error_check"
+            },
+            "disable_addins": {
+                "message": "Disable all add-ins (File → Options → Add-ins → COM Add-ins → Go). Restart Outlook normally.",
+                "end": True
+            },
+            "error_check": {
+                "question": "Do you see an error message?",
+                "yes": "error_specific",
+                "no": "new_profile"
+            },
+            "error_specific": {
+                "message": "Capture the exact error message and search internal KB or Microsoft docs for targeted fix.",
+                "end": True
+            },
+            "new_profile": {
+                "message": "Create a new Outlook profile (Control Panel → Mail → Show Profiles → Add).",
+                "end": True
             }
-        ]
+        }
     },
+
     "vpn": {
-        "steps": [
-            {
-                "ask": "Reset your network adapter. Did the connection restore?",
-                "yes": "Network adapter issue resolved.",
-                "no": "Flush DNS (ipconfig /flushdns) and retry VPN."
+        "start": "reset_adapter",
+        "nodes": {
+            "reset_adapter": {
+                "question": "Reset network adapter (ncpa.cpl). Did connection return?",
+                "yes": "resolved",
+                "no": "dns"
+            },
+            "dns": {
+                "message": "Run Command Prompt as admin → ipconfig /flushdns",
+                "end": True
+            },
+            "resolved": {
+                "message": "Connection restored. Monitor stability.",
+                "end": True
             }
-        ]
+        }
     }
 }
 
+# ----------------------------
+# SYSTEM PROMPT (AI FALLBACK)
+# ----------------------------
 SYSTEM_PROMPT = """
 You are a Tier 2 IT engineer.
 
-Rules:
-- Be concise
-- Diagnose based on user feedback
-- Do NOT repeat steps
-- Adapt based on results
+Be:
+- concise
+- diagnostic
+- adaptive
 """
 
 @app.route("/")
 def home():
     return render_template("index.html")
 
-
+# ----------------------------
+# MAIN CHAT
+# ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
     data = request.json
@@ -77,15 +107,14 @@ def ask():
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
             "issue": None,
-            "step": 0,
-            "history": [],
-            "awaiting_answer": False
+            "node": None,
+            "history": []
         }
 
     session = sessions[session_id]
+    session["history"].append(user_input)
 
     user_text = user_input.lower()
-    session["history"].append(user_input)
 
     # ----------------------------
     # DETECT ISSUE
@@ -93,41 +122,63 @@ def ask():
     if session["issue"] is None:
         session["issue"] = detect_issue(user_input)
 
+        if session["issue"] in PLAYBOOKS:
+            session["node"] = PLAYBOOKS[session["issue"]]["start"]
+
     issue = session["issue"]
 
     # ----------------------------
-    # HANDLE PLAYBOOK
+    # HANDLE TREE LOGIC
     # ----------------------------
-    if issue in PLAYBOOKS:
+    if issue in PLAYBOOKS and session["node"]:
 
-        step_data = PLAYBOOKS[issue]["steps"][0]
+        tree = PLAYBOOKS[issue]["nodes"]
+        current_node = tree[session["node"]]
 
-        # If waiting for yes/no answer
-        if session["awaiting_answer"]:
-            session["awaiting_answer"] = False
+        # If user answering a question
+        if "question" not in current_node:
 
-            if "yes" in user_text:
-                reply = step_data["yes"]
-            elif "no" in user_text:
-                reply = step_data["no"]
-            else:
-                reply = "Please answer yes or no."
+            # move forward if message node
+            if current_node.get("end"):
+                session["node"] = None
+                return jsonify({
+                    "session_id": session_id,
+                    "response": current_node["message"]
+                })
 
+        # If question node
+        if "question" in current_node:
+
+            # If user already answered
+            if any(x in user_text for x in ["yes", "no"]):
+                if "yes" in user_text:
+                    next_node = current_node["yes"]
+                else:
+                    next_node = current_node["no"]
+
+                session["node"] = next_node
+                next_data = tree[next_node]
+
+                if "message" in next_data:
+                    session["node"] = None
+                    return jsonify({
+                        "session_id": session_id,
+                        "response": next_data["message"]
+                    })
+
+                return jsonify({
+                    "session_id": session_id,
+                    "response": next_data["question"]
+                })
+
+            # Ask the question
             return jsonify({
                 "session_id": session_id,
-                "response": reply
+                "response": current_node["question"]
             })
 
-        # Ask question
-        session["awaiting_answer"] = True
-
-        return jsonify({
-            "session_id": session_id,
-            "response": step_data["ask"]
-        })
-
     # ----------------------------
-    # AI FALLBACK (ADAPTIVE)
+    # AI FALLBACK
     # ----------------------------
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -141,11 +192,9 @@ def ask():
         temperature=0.3
     )
 
-    reply = response.choices[0].message.content
-
     return jsonify({
         "session_id": session_id,
-        "response": reply
+        "response": response.choices[0].message.content
     })
 
 
