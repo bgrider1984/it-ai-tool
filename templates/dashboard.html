@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Dashboard</title>
+<title>IT Copilot Dashboard</title>
 
 <style>
 body {
@@ -12,6 +12,7 @@ body {
     display:flex;
 }
 
+/* SIDEBAR */
 .sidebar {
     width:220px;
     background:#111827;
@@ -19,37 +20,83 @@ body {
     padding:15px;
 }
 
+.sidebar h2 {
+    font-size:18px;
+    margin-bottom:10px;
+}
+
+/* MAIN AREA */
 .main {
     flex:1;
     padding:20px;
 }
 
+.header {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+}
+
+/* CHAT BOX */
 #chat {
     height:70vh;
     overflow-y:auto;
     background:#111827;
     padding:10px;
     border-radius:10px;
+    margin-top:15px;
 }
 
 .msg {
     margin:10px 0;
     padding:10px;
     border-radius:8px;
+    max-width:80%;
+    word-wrap:break-word;
 }
 
-.user { background:#2563eb; }
-.bot { background:#374151; }
+.user {
+    background:#2563eb;
+    margin-left:auto;
+}
 
-input, button {
+.bot {
+    background:#374151;
+}
+
+/* INPUT AREA */
+.input-row {
+    display:flex;
+    margin-top:10px;
+    gap:10px;
+}
+
+input {
+    flex:1;
     padding:10px;
     border:none;
     border-radius:6px;
 }
 
 button {
+    padding:10px 15px;
+    border:none;
+    border-radius:6px;
     background:#22c55e;
     color:white;
+    cursor:pointer;
+}
+
+button:hover {
+    background:#16a34a;
+}
+
+.upgrade {
+    background:#f59e0b;
+}
+
+.upgrade:hover {
+    background:#d97706;
 }
 </style>
 </head>
@@ -57,33 +104,47 @@ button {
 <body>
 
 <div class="sidebar">
-<h3>IT Copilot</h3>
-<a href="/logout" style="color:white;">Logout</a>
+    <h2>🧠 IT Copilot</h2>
+    <p>Tier 2 Assistant</p>
+    <hr>
+    <a href="/logout" style="color:white;">Logout</a>
 </div>
 
 <div class="main">
 
-<h2>Dashboard</h2>
+<div class="header">
+    <h2>Dashboard</h2>
+
+    <!-- STRIPE UPGRADE BUTTON -->
+    <button class="upgrade" onclick="upgrade()">Upgrade Pro</button>
+</div>
 
 <div id="chat"></div>
 
-<input id="input" placeholder="Ask IT issue" style="width:70%;">
-<button onclick="send()">Send</button>
+<div class="input-row">
+    <input id="input" placeholder="Describe your IT issue..." />
+    <button onclick="send()">Send</button>
+</div>
 
 </div>
 
 <script>
 
-function add(text, cls){
+function add(text, type){
     const div = document.createElement("div");
-    div.className = "msg " + cls;
+    div.className = "msg " + type;
     div.textContent = text;
-    chat.appendChild(div);
+    document.getElementById("chat").appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
 }
 
 async function send(){
-    const msg = input.value;
+
+    const msg = input.value.trim();
+    if(!msg) return;
+
     add(msg,"user");
+    input.value = "";
 
     const res = await fetch("/ask", {
         method:"POST",
@@ -92,8 +153,25 @@ async function send(){
     });
 
     const data = await res.json();
+
     add(data.response,"bot");
 }
+
+async function upgrade(){
+
+    const res = await fetch("/create-checkout-session", {
+        method:"POST"
+    });
+
+    const data = await res.json();
+
+    if(data.url){
+        window.location.href = data.url;
+    } else {
+        alert("Unable to start checkout");
+    }
+}
+
 </script>
 
 </body>
