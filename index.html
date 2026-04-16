@@ -124,8 +124,12 @@ async function sendMessage() {
         headers: {
             "Content-Type": "application/json"
         },
-        body: JSON.stringify({ message: text })
-    });
+        body: JSON.stringify({
+    history: chatHistory.map(msg => ({
+        role: msg.role === "bot" ? "assistant" : "user",
+        content: msg.text
+    }))
+})
 
     const data = await res.json();
 
