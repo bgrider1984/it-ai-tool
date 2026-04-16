@@ -6,9 +6,6 @@ from openai import OpenAI
 app = Flask(__name__)
 
 api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    raise RuntimeError("Missing OPENAI_API_KEY")
-
 client = OpenAI(api_key=api_key)
 
 sessions = {}
@@ -46,6 +43,7 @@ FLOW = {
     }
 }
 
+
 @app.route("/")
 def home():
     return render_template("index.html")
@@ -58,7 +56,7 @@ def ask():
     session_id = data.get("session_id")
 
     # ----------------------------
-    # CREATE SESSION
+    # INIT SESSION
     # ----------------------------
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
@@ -71,78 +69,78 @@ def ask():
     session = sessions[session_id]
 
     # ----------------------------
-    # STEP 0: INTENT DETECTION
+    # STEP 1: DETECT ISSUE
     # ----------------------------
     if session["step"] == "detect":
         if user_input:
             response = client.chat.completions.create(
                 model="gpt-4.1-mini",
-                max_tokens=150,
+                max_tokens=100,
                 messages=[
                     {
                         "role": "system",
-                        "content": "Classify IT issue in one short label (e.g. Outlook startup issue, network issue, printer issue)."
+                        "content": "Classify the IT issue in a short label."
                     },
-                    {
-                        "role": "user",
-                        "content": user_input
-                    }
+                    {"role": "user", "content": user_input}
                 ]
             )
 
-            issue_label = response.choices[0].message.content.strip()
+            issue = response.choices[0].message.content.strip()
 
-            session["issue"] = issue_label
-            session["step"] = "device"
+            session["issue"] = issue
+            session["step"] = "confirm_issue"
 
             return jsonify({
                 "session_id": session_id,
-                "response": f"I detected: {issue_label}. Is this correct? Let's continue troubleshooting.",
+                "response": f"I detected: {issue}. Is this correct?",
                 "options": ["Yes", "No"]
             })
 
         return jsonify({
             "session_id": session_id,
-            "response": "Describe your IT issue (e.g. 'Outlook not opening', 'WiFi not working').",
+            "response": "Describe your issue (e.g. Outlook not opening).",
             "options": []
         })
 
     # ----------------------------
-    # IF USER SAYS NO → RESTART DETECTION
+    # STEP 2: CONFIRM ISSUE (FIXED)
     # ----------------------------
-    if session["step"] == "device" and user_input.lower() == "no":
-        session["step"] = "detect"
-        session["issue"] = None
+    if session["step"] == "confirm_issue":
+        if user_input.lower() == "no":
+            session["step"] = "detect"
+            session["issue"] = None
 
-        return jsonify({
-            "session_id": session_id,
-            "response": "Please re-describe your issue.",
-            "options": []
-        })
+            return jsonify({
+                "session_id": session_id,
+                "response": "Please re-describe your issue.",
+                "options": []
+            })
+
+        if user_input.lower() == "yes":
+            session["step"] = "device"
 
     # ----------------------------
-    # NORMAL WIZARD FLOW
+    # NORMAL FLOW
     # ----------------------------
     step = session["step"]
-    node = FLOW.get(step)
+    node = FLOW[step]
 
-    if user_input:
+    if user_input and step in FLOW:
         session["answers"][step] = user_input
 
-        if node and node["next"]:
+        if node["next"]:
             session["step"] = node["next"]
             step = session["step"]
             node = FLOW[step]
 
     # ----------------------------
-    # FINAL AI DIAGNOSIS
+    # FINAL STEP
     # ----------------------------
     if step == "final":
         summary = session["answers"]
 
         prompt = f"""
 Issue: {session['issue']}
-
 Device: {summary.get("device")}
 Type: {summary.get("issue_type")}
 Scope: {summary.get("scope")}
@@ -150,10 +148,10 @@ Duration: {summary.get("duration")}
 Error: {summary.get("error")}
 
 Provide:
-1. Likely causes
-2. Step-by-step fix
-3. Commands (if needed)
-4. Escalation guidance
+- Likely causes
+- Step-by-step fix
+- Commands
+- Escalation guidance
 """
 
         response = client.chat.completions.create(
@@ -173,8 +171,8 @@ Provide:
 
     return jsonify({
         "session_id": session_id,
-        "response": node["question"] if node else "Continuing...",
-        "options": node["options"] if node else []
+        "response": node["question"],
+        "options": node["options"]
     })
 
 
