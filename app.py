@@ -9,7 +9,12 @@ from openai import OpenAI
 # APP SETUP
 # ----------------------------
 app = Flask(__name__)
+
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-change-me")
+
+# IMPORTANT: Render session stability fix
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = True
 
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///local.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
@@ -17,7 +22,7 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
 # ----------------------------
-# OPENAI SETUP
+# OPENAI
 # ----------------------------
 client = None
 if os.getenv("OPENAI_API_KEY"):
@@ -61,32 +66,22 @@ def current_user():
     return User.query.get(session["user_id"])
 
 def is_admin():
-    user = current_user()
-    return user and user.is_admin
+    u = current_user()
+    return u and u.is_admin
 
 # ----------------------------
-# AI ENGINE
+# HEALTH CHECK (FIXED MISSING ROUTE)
 # ----------------------------
-def ask_ai(message):
-    if not client:
-        return "AI not configured."
-
-    res = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[
-            {"role": "system", "content": "You are a fast Tier 2 IT help desk copilot. Be direct and structured."},
-            {"role": "user", "content": message}
-        ],
-        temperature=0.2,
-        max_tokens=400
-    )
-
-    return res.choices[0].message.content
+@app.route("/health")
+def health():
+    return jsonify({
+        "status": "ok",
+        "session_user": session.get("user_id")
+    })
 
 # ----------------------------
-# ROUTES
+# HOME
 # ----------------------------
-
 @app.route("/")
 def home():
     if session.get("user_id"):
@@ -94,55 +89,59 @@ def home():
     return render_template("index.html")
 
 # ----------------------------
-# AUTH
+# SIGNUP (FIXED)
 # ----------------------------
 @app.route("/signup", methods=["POST"])
 def signup():
 
     data = request.json or {}
 
-    email = data.get("email","").strip()
-    password = data.get("password","").strip()
-    invite_code = data.get("invite_code","").strip()
+    email = data.get("email", "").strip()
+    password = data.get("password", "").strip()
+    invite_code = data.get("invite_code", "").strip()
 
     if not email or not password:
-        return jsonify({"error":"Missing fields"}), 400
+        return jsonify({"error": "Missing fields"}), 400
 
     invite = Invite.query.filter_by(code=invite_code, used=False).first()
     if not invite:
-        return jsonify({"error":"Invalid invite code"}), 403
+        return jsonify({"error": "Invalid invite code"}), 403
 
     if User.query.filter_by(email=email).first():
-        return jsonify({"error":"User already exists"}), 400
+        return jsonify({"error": "User already exists"}), 400
 
     user = User(email=email, password=password)
-
     invite.used = True
 
     db.session.add(user)
     db.session.commit()
 
-    return jsonify({"status":"created"})
+    return jsonify({"status": "created"})
 
-
+# ----------------------------
+# LOGIN (FIXED SESSION BUG)
+# ----------------------------
 @app.route("/login", methods=["POST"])
 def login():
 
     data = request.json or {}
 
-    email = data.get("email","").strip()
-    password = data.get("password","").strip()
+    email = data.get("email", "").strip()
+    password = data.get("password", "").strip()
 
     user = User.query.filter_by(email=email, password=password).first()
 
     if not user:
-        return jsonify({"error":"Invalid login"}), 401
+        return jsonify({"error": "Invalid login"}), 401
 
     session["user_id"] = user.id
+    session.modified = True  # IMPORTANT FIX
 
-    return jsonify({"status":"ok"})
+    return jsonify({"status": "ok"})
 
-
+# ----------------------------
+# LOGOUT
+# ----------------------------
 @app.route("/logout")
 def logout():
     session.clear()
@@ -158,19 +157,30 @@ def dashboard():
     return render_template("dashboard.html")
 
 # ----------------------------
-# CHAT ENGINE
+# CHAT
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
 
     user = current_user()
     if not user:
-        return jsonify({"error":"unauthorized"}), 401
+        return jsonify({"error": "unauthorized"}), 401
 
     data = request.json
     message = data.get("message")
 
-    response = ask_ai(message)
+    if client:
+        res = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": "You are a Tier 2 IT Copilot."},
+                {"role": "user", "content": message}
+            ],
+            temperature=0.2
+        )
+        response = res.choices[0].message.content
+    else:
+        response = "AI not configured."
 
     db.session.add(ChatLog(
         user_id=user.id,
@@ -183,14 +193,14 @@ def ask():
     return jsonify({"response": response})
 
 # ----------------------------
-# FEEDBACK SYSTEM
+# FEEDBACK
 # ----------------------------
 @app.route("/feedback", methods=["POST"])
 def feedback():
 
     user = current_user()
     if not user:
-        return jsonify({"error":"unauthorized"}), 401
+        return jsonify({"error": "unauthorized"}), 401
 
     data = request.json
 
@@ -204,16 +214,16 @@ def feedback():
     db.session.add(fb)
     db.session.commit()
 
-    return jsonify({"status":"ok"})
+    return jsonify({"status": "ok"})
 
 # ----------------------------
-# ADMIN: GENERATE INVITE
+# ADMIN INVITE GENERATION
 # ----------------------------
 @app.route("/admin/invite", methods=["POST"])
-def generate_invite():
+def admin_invite():
 
     if not is_admin():
-        return jsonify({"error":"forbidden"}), 403
+        return jsonify({"error": "forbidden"}), 403
 
     code = str(uuid.uuid4())[:8]
 
@@ -224,7 +234,7 @@ def generate_invite():
     return jsonify({"invite": code})
 
 # ----------------------------
-# ANALYTICS v2 (ADMIN)
+# ANALYTICS
 # ----------------------------
 @app.route("/analytics")
 def analytics():
@@ -232,25 +242,13 @@ def analytics():
     if not is_admin():
         return "Unauthorized", 403
 
-    users = User.query.count()
-    messages = ChatLog.query.count()
-    feedback_total = Feedback.query.count()
-    helpful = Feedback.query.filter_by(helpful=True).count()
-    not_helpful = Feedback.query.filter_by(helpful=False).count()
-
-    recent_issues = ChatLog.query.order_by(ChatLog.created_at.desc()).limit(20).all()
-
-    issue_texts = [i.message for i in recent_issues]
-
-    return render_template(
-        "analytics.html",
-        total_users=users,
-        total_messages=messages,
-        total_feedback=feedback_total,
-        helpful=helpful,
-        not_helpful=not_helpful,
-        issues=issue_texts
-    )
+    return jsonify({
+        "users": User.query.count(),
+        "messages": ChatLog.query.count(),
+        "feedback": Feedback.query.count(),
+        "helpful": Feedback.query.filter_by(helpful=True).count(),
+        "not_helpful": Feedback.query.filter_by(helpful=False).count()
+    })
 
 # ----------------------------
 # INIT DB
