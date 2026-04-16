@@ -20,36 +20,59 @@ client = OpenAI(api_key=api_key)
 sessions = {}
 
 # ----------------------------
-# SYSTEM PROMPT (COACH + TRAINING ENGINE)
+# DETECT MISTAKE SIGNALS
+# ----------------------------
+def detect_confusion(messages):
+    """
+    Simple heuristic to detect if user is struggling.
+    """
+    recent = messages[-4:] if len(messages) >= 4 else messages
+
+    text_blob = " ".join([m["content"].lower() for m in recent if m["role"] == "user"])
+
+    signals = 0
+
+    confusion_phrases = [
+        "not sure",
+        "i don't know",
+        "no idea",
+        "doesn't work",
+        "still not",
+        "same issue",
+        "nothing happens",
+        "didn't work"
+    ]
+
+    for phrase in confusion_phrases:
+        if phrase in text_blob:
+            signals += 1
+
+    return signals >= 2  # threshold for “user is struggling”
+
+# ----------------------------
+# SYSTEM PROMPT (ENHANCED COACH)
 # ----------------------------
 SYSTEM_PROMPT = """
-You are a senior IT engineer acting as both:
-
-1. Troubleshooting assistant
-2. Junior IT trainer
+You are a senior IT engineer mentoring a junior technician.
 
 You operate in three modes:
 
-MODE 1: COACH MODE
-- Explain briefly why
-- Give ONE step
-- Continue based on response
+COACH MODE:
+- Teach while troubleshooting
+- One step at a time
 
-MODE 2: FAST FIX MODE
-- No explanations
-- Only next action
+FAST MODE:
+- No explanation
+- Only next step
 
-MODE 3: TRAINING MODE
-- Give ONE step
-- THEN ask what happened after the step
-- Reinforce learning
-- Confirm understanding before continuing
+TRAINING MODE:
+- One step
+- Then ask what happened
 
-Rules:
-- Always give ONLY ONE step at a time
-- Never overwhelm the user
-- Never give multiple steps in a list
-- Keep responses structured
+IMPORTANT BEHAVIOR RULES:
+- NEVER give multiple steps at once
+- ALWAYS wait for user response before advancing
+- Be concise and structured
 
 Response format:
 
@@ -57,10 +80,6 @@ Response format:
 2. Next step (ONLY ONE)
 3. What to observe
 4. If it fails, next direction
-
-In TRAINING MODE ONLY:
-Add at the end:
-"👉 What happened when you tried this?"
 """
 
 # ----------------------------
@@ -94,19 +113,36 @@ def ask():
     session["mode"] = mode
 
     # ----------------------------
-    # MODE INSTRUCTIONS
-    # ----------------------------
-    if mode == "fast":
-        mode_instruction = "FAST FIX MODE: No explanations. Only next action."
-    elif mode == "training":
-        mode_instruction = "TRAINING MODE: Teach by doing. After each step, ask what happened."
-    else:
-        mode_instruction = "COACH MODE: Brief explanation plus next step."
-
-    # ----------------------------
     # STORE USER MESSAGE
     # ----------------------------
     session["messages"].append({"role": "user", "content": user_input})
+
+    # ----------------------------
+    # MISTAKE DETECTION
+    # ----------------------------
+    struggling = detect_confusion(session["messages"])
+
+    # ----------------------------
+    # MODE INSTRUCTIONS
+    # ----------------------------
+    if mode == "fast":
+        mode_instruction = "FAST MODE: no explanation, only next action."
+    elif mode == "training":
+        mode_instruction = "TRAINING MODE: teach and ask what happened after each step."
+    else:
+        mode_instruction = "COACH MODE: explain briefly and guide step-by-step."
+
+    # ----------------------------
+    # ADD MISTAKE DETECTION BEHAVIOR
+    # ----------------------------
+    if struggling:
+        mode_instruction += """
+USER APPEARS CONFUSED:
+- Slow down
+- Re-explain the last step more simply
+- Do NOT advance steps until user confirms understanding
+- Ask a single clarifying question if needed
+"""
 
     # ----------------------------
     # BUILD CONTEXT
@@ -135,7 +171,7 @@ def ask():
     return jsonify({
         "session_id": session_id,
         "response": reply,
-        "mode": session["mode"]
+        "confusion_detected": struggling
     })
 
 
