@@ -20,31 +20,78 @@ client = OpenAI(api_key=api_key)
 sessions = {}
 
 # ----------------------------
-# SYSTEM PROMPT (CONTROLLED AI)
+# SYSTEM PROMPT
 # ----------------------------
 SYSTEM_PROMPT = """
 You are an enterprise IT troubleshooting assistant.
 
 Your job:
-- Ask one focused troubleshooting question at a time
-- ALWAYS include multiple-choice options (4 max)
-- Always include "Not sure" as the last option
-- Keep options short and actionable
-- Do NOT ask open-ended questions
+- Ask ONE clear troubleshooting question at a time
+- Be concise and technical
+- Adapt based on previous answers
+- When enough information is gathered, provide FINAL_DIAGNOSIS
 
-When enough information is collected, respond with:
+Format:
 
-FINAL_DIAGNOSIS:
+If asking a question:
+Return ONLY the question.
+
+If ready to resolve:
+Start with FINAL_DIAGNOSIS and include:
 1. Likely cause
-2. Step-by-step fix
-3. Commands if applicable
+2. Fix steps
+3. Commands (if applicable)
 4. Prevention tips
-
-Rules:
-- Be concise
-- Be technical but simple
-- Never repeat the same question
 """
+
+# ----------------------------
+# SUGGESTION GENERATOR
+# ----------------------------
+def generate_suggestions(question):
+    """
+    Creates intelligent common answers for UI buttons.
+    """
+    q = question.lower()
+
+    if "error" in q:
+        return [
+            "Yes, I see an error message",
+            "No error appears",
+            "It closes immediately",
+            "Not sure"
+        ]
+
+    if "open" in q or "launch" in q:
+        return [
+            "It won't open at all",
+            "It opens then closes",
+            "It freezes",
+            "Not sure"
+        ]
+
+    if "network" in q or "internet" in q:
+        return [
+            "No internet connection",
+            "Slow connection",
+            "Intermittent dropouts",
+            "Not sure"
+        ]
+
+    if "outlook" in q or "email" in q:
+        return [
+            "Won't open",
+            "Not syncing",
+            "Error message appears",
+            "Not sure"
+        ]
+
+    # default safe fallback
+    return [
+        "Yes",
+        "No",
+        "Not sure",
+        "Other"
+    ]
 
 # ----------------------------
 # HOME
@@ -52,16 +99,6 @@ Rules:
 @app.route("/")
 def home():
     return render_template("index.html")
-
-# ----------------------------
-# HELPERS
-# ----------------------------
-def extract_options(text):
-    """
-    Ensures UI always gets options.
-    If AI forgets, we safely fallback.
-    """
-    return ["Not sure"]
 
 # ----------------------------
 # MAIN ENDPOINT
@@ -84,15 +121,9 @@ def ask():
     session = sessions[session_id]
 
     # ----------------------------
-    # STORE USER INPUT
+    # STORE USER MESSAGE
     # ----------------------------
     session["messages"].append({"role": "user", "content": user_input})
-
-    # ----------------------------
-    # BUILD CONTEXT
-    # ----------------------------
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.extend(session["messages"])
 
     # ----------------------------
     # AI CALL
@@ -100,51 +131,23 @@ def ask():
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         max_tokens=500,
-        messages=messages
+        messages=[{"role": "system", "content": SYSTEM_PROMPT}] + session["messages"]
     )
 
     reply = response.choices[0].message.content
 
     # ----------------------------
-    # DETECT FINAL ANSWER
+    # CHECK IF FINAL
     # ----------------------------
     is_final = "FINAL_DIAGNOSIS" in reply
 
     # ----------------------------
-    # GENERATE SAFE OPTIONS
+    # GENERATE SMART SUGGESTIONS
     # ----------------------------
-    options = []
+    suggestions = []
 
     if not is_final:
-        # Ask AI to propose options (second lightweight call avoided for cost)
-        # We infer simple safe defaults based on question type
-
-        if "error" in reply.lower():
-            options = [
-                "Yes",
-                "No",
-                "Not sure"
-            ]
-        elif "network" in reply.lower():
-            options = [
-                "WiFi issue",
-                "No internet",
-                "Slow connection",
-                "Not sure"
-            ]
-        elif "outlook" in reply.lower() or "email" in reply.lower():
-            options = [
-                "Won't open",
-                "Not syncing",
-                "Error message",
-                "Not sure"
-            ]
-        else:
-            options = [
-                "Yes",
-                "No",
-                "Not sure"
-            ]
+        suggestions = generate_suggestions(reply)
 
     # ----------------------------
     # STORE ASSISTANT RESPONSE
@@ -154,7 +157,7 @@ def ask():
     return jsonify({
         "session_id": session_id,
         "response": reply,
-        "options": options,
+        "options": suggestions,
         "done": is_final
     })
 
