@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>IT Copilot</title>
+<title>IT Copilot Workflow Engine</title>
 
 <style>
 body {
@@ -24,33 +24,48 @@ body {
     background:#111827;
     padding:15px;
     border-radius:10px;
-    display:flex;
-    flex-direction:column;
 }
 
 .msg {
-    margin:8px 0;
+    margin:10px 0;
     padding:10px;
     border-radius:8px;
-    max-width:90%;
-    white-space:pre-wrap;
 }
 
 .user {
     background:#2563eb;
-    align-self:flex-end;
 }
 
 .bot {
     background:#374151;
-    align-self:flex-start;
 }
 
 .step {
-    margin-top:10px;
-    padding:10px;
     background:#1f2937;
+    padding:10px;
+    margin-top:10px;
     border-radius:8px;
+}
+
+button {
+    margin-top:8px;
+    margin-right:8px;
+    padding:6px 10px;
+    border:none;
+    border-radius:6px;
+    cursor:pointer;
+}
+
+.run {
+    background:#22c55e;
+}
+
+.pass {
+    background:#3b82f6;
+}
+
+.fail {
+    background:#ef4444;
 }
 
 .inputArea {
@@ -65,21 +80,13 @@ input {
     border-radius:8px;
     border:none;
 }
-
-button {
-    padding:10px 15px;
-    border:none;
-    border-radius:8px;
-    background:#22c55e;
-    color:white;
-}
 </style>
 </head>
 
 <body>
 
 <div class="container">
-<h2>IT Copilot</h2>
+<h2>Workflow IT Copilot</h2>
 
 <div id="chat"></div>
 
@@ -96,50 +103,68 @@ let sessionId = localStorage.getItem("sessionId");
 const chat = document.getElementById("chat");
 const input = document.getElementById("input");
 
-input.addEventListener("keydown", e => {
-    if(e.key === "Enter") send();
-});
+let currentStep = null;
 
-function renderBot(data){
+function addUser(text){
+    const div = document.createElement("div");
+    div.className = "msg user";
+    div.textContent = text;
+    chat.appendChild(div);
+}
+
+function renderStep(step){
 
     const div = document.createElement("div");
-    div.className = "msg bot";
-
-    let parsed;
-
-    try {
-        parsed = JSON.parse(data.response);
-    } catch {
-        div.textContent = data.response;
-        chat.appendChild(div);
-        return;
-    }
+    div.className = "msg bot step";
 
     div.innerHTML = `
-        <b>Issue:</b> ${parsed.issue_summary}<br>
-        <b>Cause:</b> ${parsed.likely_cause}<br>
-        <b>Confidence:</b> ${parsed.confidence}<br><br>
-        <b>START HERE:</b>
+        <b>${step.title}</b><br><br>
+        ${step.instructions}<br><br>
+        <small>${step.expected}</small><br><br>
     `;
 
-    parsed.steps.forEach((step, i) => {
+    const run = document.createElement("button");
+    run.className = "run";
+    run.textContent = "Run Step";
 
-        const s = document.createElement("div");
-        s.className = "step";
+    const pass = document.createElement("button");
+    pass.className = "pass";
+    pass.textContent = "Worked";
 
-        s.innerHTML = `
-            <b>${step.title}</b><br><br>
-            <b>Instructions:</b><br>
-            ${step.instructions.join("<br>")}<br><br>
-            <b>Expected:</b> ${step.expected}<br>
-            <b>If it fails:</b> ${step.if_failed}
-        `;
+    const fail = document.createElement("button");
+    fail.className = "fail";
+    fail.textContent = "Failed";
 
-        div.appendChild(s);
-    });
+    run.onclick = () => alert("Execute manually: " + step.instructions);
+
+    pass.onclick = () => sendStep(step.id, "passed");
+    fail.onclick = () => sendStep(step.id, "failed");
+
+    div.appendChild(run);
+    div.appendChild(pass);
+    div.appendChild(fail);
 
     chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
+}
+
+async function sendStep(step_id, result){
+
+    const res = await fetch("/step", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+            session_id: sessionId,
+            step_id,
+            result
+        })
+    });
+
+    const data = await res.json();
+
+    if(data.next_step){
+        renderStep(data.next_step);
+    }
 }
 
 async function send(){
@@ -147,11 +172,7 @@ async function send(){
     const msg = input.value.trim();
     if(!msg) return;
 
-    const user = document.createElement("div");
-    user.className = "msg user";
-    user.textContent = msg;
-    chat.appendChild(user);
-
+    addUser(msg);
     input.value = "";
 
     const res = await fetch("/ask", {
@@ -168,7 +189,9 @@ async function send(){
     sessionId = data.session_id;
     localStorage.setItem("sessionId", sessionId);
 
-    renderBot(data);
+    if(data.step){
+        renderStep(data.step);
+    }
 }
 
 </script>
