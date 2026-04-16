@@ -8,26 +8,45 @@
 body {
     margin: 0;
     font-family: Arial;
-    background: #0f172a;
     color: white;
+    background: radial-gradient(circle at top, #0b1220, #05070f);
+}
+
+/* subtle grid */
+body::before {
+    content: "";
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    background-image:
+        linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: 0.15;
+    pointer-events: none;
 }
 
 .container {
     max-width: 900px;
     margin: auto;
     padding: 20px;
+    position: relative;
+    z-index: 2;
 }
 
 h2 {
     text-align: center;
+    color: #93c5fd;
 }
 
+/* CHAT */
 #chat {
     height: 70vh;
     overflow-y: auto;
-    background: #111827;
+    background: rgba(17,24,39,0.75);
+    backdrop-filter: blur(8px);
+    border-radius: 12px;
     padding: 15px;
-    border-radius: 10px;
     display: flex;
     flex-direction: column;
 }
@@ -50,27 +69,7 @@ h2 {
     align-self: flex-start;
 }
 
-/* ACTION BUTTONS */
-.actions {
-    margin-top: 5px;
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.actionBtn {
-    background: #22c55e;
-    border: none;
-    padding: 6px 10px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 12px;
-}
-
-.actionBtn:hover {
-    background: #16a34a;
-}
-
+/* INPUT */
 .inputArea {
     display: flex;
     gap: 10px;
@@ -82,6 +81,8 @@ input {
     padding: 12px;
     border-radius: 8px;
     border: none;
+    background: rgba(0,0,0,0.4);
+    color: white;
 }
 
 button {
@@ -90,6 +91,7 @@ button {
     background: #22c55e;
     border-radius: 8px;
     cursor: pointer;
+    font-weight: bold;
 }
 </style>
 </head>
@@ -103,7 +105,7 @@ button {
 <div id="chat"></div>
 
 <div class="inputArea">
-    <input id="input" placeholder="Describe your issue..." />
+    <input id="input" placeholder="Describe your IT issue..." />
     <button onclick="send()">Send</button>
 </div>
 
@@ -123,10 +125,7 @@ input.addEventListener("keydown", function(e){
     }
 });
 
-// ----------------------------
-// CHAT MESSAGE
-// ----------------------------
-function addMessage(text, type){
+function add(text, type){
     const div = document.createElement("div");
     div.className = "msg " + type;
     div.textContent = text;
@@ -134,53 +133,20 @@ function addMessage(text, type){
     chat.scrollTop = chat.scrollHeight;
 }
 
-// ----------------------------
-// ACTION RUNNER (GUIDED STEPS)
-// ----------------------------
-async function runAction(actionId){
-    let step = 0;
-
-    async function next(){
-        const res = await fetch("/action", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({
-                action_id: actionId,
-                step: step
-            })
-        });
-
-        const data = await res.json();
-
-        if(data.done){
-            addMessage(data.message, "bot");
-            return;
-        }
-
-        addMessage(data.instruction, "bot");
-        step = data.next_step;
-    }
-
-    next();
-}
-
-// ----------------------------
-// SEND MESSAGE
-// ----------------------------
 async function send(){
 
     const msg = input.value.trim();
     if(!msg) return;
 
-    addMessage(msg, "user");
+    add(msg,"user");
     input.value = "";
 
-    const res = await fetch("/ask", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-            message: msg,
-            session_id: sessionId
+    const res = await fetch("/ask",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+            message:msg,
+            session_id:sessionId
         })
     });
 
@@ -188,26 +154,7 @@ async function send(){
 
     sessionId = data.session_id;
 
-    addMessage(data.response, "bot");
-
-    // render actions
-    if(data.actions && data.actions.length > 0){
-        const wrap = document.createElement("div");
-        wrap.className = "actions";
-
-        data.actions.forEach(a => {
-            const btn = document.createElement("button");
-            btn.className = "actionBtn";
-            btn.innerText = a.label;
-
-            btn.onclick = () => runAction(a.id);
-
-            wrap.appendChild(btn);
-        });
-
-        chat.appendChild(wrap);
-        chat.scrollTop = chat.scrollHeight;
-    }
+    add(data.response,"bot");
 }
 
 </script>
