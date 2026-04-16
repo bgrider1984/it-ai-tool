@@ -10,51 +10,55 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 sessions = {}
 
 # ----------------------------
-# SESSION INIT
+# SESSION
 # ----------------------------
 def get_session(session_id):
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
-            "steps": [],
-            "current_index": 0,
-            "step_results": {},
-            "history": []
+            "history": [],
+            "last_issue": None,
+            "last_response": ""
         }
     return session_id, sessions[session_id]
 
 # ----------------------------
-# AI ENGINE (STRUCTURED STEPS)
+# INTENT SWITCH DETECTION
 # ----------------------------
-def generate_plan(message, history):
+def is_new_issue(prev, msg):
+    triggers = ["new issue", "actually", "instead", "different", "switch", "forget"]
+    if prev is None:
+        return True
+    return any(t in msg.lower() for t in triggers)
+
+# ----------------------------
+# JUNIOR TECH COPILOT ENGINE
+# ----------------------------
+def generate_help(issue, history):
 
     prompt = f"""
-You are a Tier 2 IT troubleshooting engineer.
-
-Create an EXECUTABLE troubleshooting plan.
+You are a senior IT technician helping a junior technician.
 
 Rules:
-- Steps must be actionable
-- Each step must be independent
-- Include clear instructions
-- Order from easiest → hardest fix
+- Keep answers simple, direct, and practical
+- No enterprise language
+- No workflows or systems
+- Provide step-by-step troubleshooting
+- If needed, adapt steps based on failure feedback
+- Always prioritize the most likely fix first
 
-Return ONLY JSON:
+Return format:
 
-{{
-  "issue": "short description",
-  "steps": [
-    {{
-      "id": "unique_step_id",
-      "title": "step name",
-      "instructions": "exact actions user performs",
-      "expected": "what should happen"
-    }}
-  ]
-}}
+Problem Summary:
+Cause:
+Steps:
+1.
+2.
+3.
+What to do if it doesn't work:
 
 Issue:
-{message}
+{issue}
 
 History:
 {history}
@@ -64,36 +68,13 @@ History:
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
-        max_tokens=700
+        max_tokens=600
     )
 
     return response.choices[0].message.content
 
 # ----------------------------
-# STEP EVALUATION ENGINE
-# ----------------------------
-def evaluate_next_step(session):
-
-    steps = session["steps"]
-    idx = session["current_index"]
-
-    # skip completed steps
-    while idx < len(steps):
-        step_id = steps[idx]["id"]
-        if session["step_results"].get(step_id) == "failed":
-            idx += 1
-            continue
-        break
-
-    session["current_index"] = idx
-
-    if idx >= len(steps):
-        return None
-
-    return steps[idx]
-
-# ----------------------------
-# ROUTES
+# ROUTE
 # ----------------------------
 @app.route("/")
 def home():
@@ -103,59 +84,25 @@ def home():
 def ask():
 
     data = request.json
+
     session_id = data.get("session_id")
     message = data.get("message", "")
 
     session_id, session = get_session(session_id)
 
+    # reset if new issue
+    if is_new_issue(session["last_issue"], message):
+        session["history"] = []
+
     session["history"].append(message)
+    session["last_issue"] = message
 
-    raw = generate_plan(message, session["history"])
-
-    try:
-        plan = eval(raw.replace("null", "None"))
-    except:
-        plan = {"issue": "error", "steps": []}
-
-    session["steps"] = plan.get("steps", [])
-    session["current_index"] = 0
-    session["step_results"] = {}
-
-    next_step = evaluate_next_step(session)
+    # generate response
+    reply = generate_help(message, session["history"])
 
     return jsonify({
         "session_id": session_id,
-        "issue": plan.get("issue"),
-        "step": next_step,
-        "all_steps": session["steps"]
-    })
-
-
-# ----------------------------
-# STEP FEEDBACK ENDPOINT
-# ----------------------------
-@app.route("/step", methods=["POST"])
-def step_feedback():
-
-    data = request.json
-    session_id = data.get("session_id")
-    step_id = data.get("step_id")
-    result = data.get("result")  # passed / failed
-
-    session = sessions.get(session_id)
-
-    if not session:
-        return jsonify({"error": "no session"}), 400
-
-    session["step_results"][step_id] = result
-
-    if result == "passed":
-        session["current_index"] += 1
-
-    next_step = evaluate_next_step(session)
-
-    return jsonify({
-        "next_step": next_step
+        "response": reply
     })
 
 
