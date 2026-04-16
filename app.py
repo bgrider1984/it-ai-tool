@@ -1,99 +1,40 @@
 import os
 import uuid
-from datetime import datetime
 from flask import Flask, request, jsonify, session, redirect, render_template
-from flask_sqlalchemy import SQLAlchemy
 
-# ----------------------------
-# APP SETUP
-# ----------------------------
 app = Flask(__name__)
 
+# ----------------------------
+# CORE CONFIG
+# ----------------------------
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = True
 
-app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///local.db")
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
-db = SQLAlchemy(app)
-
 # ----------------------------
-# SESSION MEMORY
+# IN-MEMORY STORAGE (BETA MODE)
 # ----------------------------
-sessions = {}
+USERS = {}         # email -> {password, is_admin}
+INVITES = set()    # valid invite codes
+SESSIONS = {}      # session tracking
 
-def get_session():
-    sid = session.get("sid")
-    if not sid:
-        sid = str(uuid.uuid4())
-        session["sid"] = sid
-        sessions[sid] = {
-            "issue": None,
-            "step_index": 0,
-            "steps": [],
-            "history": []
-        }
-    return sessions[sid]
-
-# ----------------------------
-# ISSUE DETECTION
-# ----------------------------
-def detect_issue(text):
-    t = text.lower()
-
-    if "vpn" in t or "network" in t:
-        return "network"
-    if "outlook" in t or "email" in t:
-        return "outlook"
-    if "login" in t or "password" in t:
-        return "auth"
-    if "slow" in t or "crash" in t:
-        return "performance"
-
-    return "general"
-
-# ----------------------------
-# TROUBLESHOOTING TREE
-# ----------------------------
-TREE = {
-    "network": [
-        {"id": "net1", "text": "Check WiFi/Ethernet connection"},
-        {"id": "net2", "text": "Flush DNS (ipconfig /flushdns)"},
-        {"id": "net3", "text": "Reset network adapter"},
-        {"id": "net4", "text": "Test DNS (8.8.8.8)"}
-    ],
-    "outlook": [
-        {"id": "out1", "text": "Restart Outlook"},
-        {"id": "out2", "text": "Run Outlook Safe Mode"},
-        {"id": "out3", "text": "Repair Office"},
-        {"id": "out4", "text": "Recreate Outlook Profile"}
-    ],
-    "auth": [
-        {"id": "auth1", "text": "Verify password"},
-        {"id": "auth2", "text": "Clear cached credentials"},
-        {"id": "auth3", "text": "Check account lockout"},
-        {"id": "auth4", "text": "Reset password"}
-    ],
-    "performance": [
-        {"id": "perf1", "text": "Check Task Manager CPU/RAM"},
-        {"id": "perf2", "text": "Scan for malware"},
-        {"id": "perf3", "text": "Check disk usage"},
-        {"id": "perf4", "text": "Restart system"}
-    ],
-    "general": [
-        {"id": "gen1", "text": "Restart device"},
-        {"id": "gen2", "text": "Check recent changes"},
-        {"id": "gen3", "text": "Run system diagnostics"}
-    ]
+# create default admin
+USERS["admin@local"] = {
+    "password": "admin",
+    "is_admin": True
 }
 
 # ----------------------------
-# AUTH
+# HEALTH CHECK
 # ----------------------------
-def current_user():
-    return session.get("user_id")
+@app.route("/health")
+def health():
+    return jsonify({
+        "status": "ok",
+        "users": len(USERS),
+        "active_sessions": len(SESSIONS)
+    })
 
 # ----------------------------
 # HOME
@@ -102,110 +43,133 @@ def current_user():
 def home():
     return render_template("index.html")
 
+# ----------------------------
+# DASHBOARD
+# ----------------------------
 @app.route("/dashboard")
 def dashboard():
-    if not session.get("user_id"):
+    if not session.get("user"):
         return redirect("/")
     return render_template("dashboard.html")
 
 # ----------------------------
-# HEALTH (DEBUG FIXED)
+# SIGNUP (INVITE REQUIRED)
 # ----------------------------
-@app.route("/health")
-def health():
-    return jsonify({
-        "status": "ok",
-        "sessions": len(sessions)
-    })
+@app.route("/signup", methods=["POST"])
+def signup():
+
+    data = request.json
+
+    email = data.get("email", "").strip()
+    password = data.get("password", "").strip()
+    invite = data.get("invite_code", "").strip()
+
+    if not email or not password:
+        return jsonify({"error": "missing fields"}), 400
+
+    if invite not in INVITES:
+        return jsonify({"error": "invalid invite"}), 403
+
+    if email in USERS:
+        return jsonify({"error": "user exists"}), 400
+
+    USERS[email] = {
+        "password": password,
+        "is_admin": False
+    }
+
+    INVITES.remove(invite)
+
+    return jsonify({"status": "created"})
 
 # ----------------------------
-# LOGIN (FIXED SESSION ISSUE)
+# LOGIN (FIXED SESSION)
 # ----------------------------
 @app.route("/login", methods=["POST"])
 def login():
+
     data = request.json
+    email = data.get("email", "")
+    password = data.get("password", "")
 
-    # TEMP SIMPLE LOGIN (until DB fully enforced)
-    if data.get("email") and data.get("password"):
-        session["user_id"] = str(uuid.uuid4())
-        session.modified = True
-        return jsonify({"status": "ok"})
+    user = USERS.get(email)
 
-    return jsonify({"error": "invalid"}), 401
+    if not user or user["password"] != password:
+        return jsonify({"error": "invalid login"}), 401
+
+    session["user"] = email
+    session.modified = True
+
+    return jsonify({"status": "ok"})
 
 # ----------------------------
-# COPILOT v4 ENGINE
+# LOGOUT
+# ----------------------------
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/")
+
+# ----------------------------
+# ASK (COPILOT ENGINE SIMPLIFIED)
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
 
-    data = request.json
-    message = data.get("message")
-
-    state = get_session()
-
-    issue = detect_issue(message)
-    state["issue"] = issue
-
-    steps = TREE.get(issue, TREE["general"])
-
-    index = state["step_index"]
-
-    if index >= len(steps):
-        step = {"id": "done", "text": "Escalate to Tier 2 technician"}
-    else:
-        step = steps[index]
-
-    state["steps"].append(step)
-
-    response = {
-        "issue": issue,
-        "step": step,
-        "step_index": index,
-        "next_action": "run_step"
-    }
-
-    return jsonify(response)
-
-# ----------------------------
-# STEP EXECUTION
-# ----------------------------
-@app.route("/run_step", methods=["POST"])
-def run_step():
+    if not session.get("user"):
+        return jsonify({"error": "unauthorized"}), 401
 
     data = request.json
-    sid = session.get("sid")
-    state = sessions.get(sid)
+    msg = data.get("message", "").lower()
 
-    success = data.get("success")
-
-    if success:
-        state["step_index"] += 1
-        result = "Step marked successful → moving to next step"
+    if "vpn" in msg:
+        step = "Check VPN connection → reconnect VPN client"
+    elif "outlook" in msg:
+        step = "Restart Outlook → run in safe mode if needed"
+    elif "login" in msg:
+        step = "Verify password → check account lock status"
+    elif "crash" in msg:
+        step = "Check Task Manager → CPU/RAM usage"
     else:
-        # branch fallback
-        state["step_index"] += 1
-        result = "Step failed → switching troubleshooting branch"
+        step = "Restart device → check issue again"
 
     return jsonify({
-        "result": result,
-        "next_index": state["step_index"]
+        "issue_detected": True,
+        "step": step
     })
 
 # ----------------------------
-# ANALYTICS
+# ANALYTICS (FIXED BEHAVIOR)
 # ----------------------------
 @app.route("/analytics")
 def analytics():
 
-    if not session.get("user_id"):
-        return "Unauthorized", 403
+    if not session.get("user"):
+        return redirect("/")
+
+    user = session.get("user")
 
     return jsonify({
-        "users": 1,
-        "sessions": len(sessions),
-        "status": "beta-v4-active"
+        "current_user": user,
+        "total_users": len(USERS),
+        "active_sessions": len(SESSIONS)
     })
+
+# ----------------------------
+# ADMIN: CREATE INVITE
+# ----------------------------
+@app.route("/admin/invite")
+def create_invite():
+
+    user = session.get("user")
+
+    if user != "admin@local":
+        return "forbidden", 403
+
+    code = str(uuid.uuid4())[:8]
+    INVITES.add(code)
+
+    return jsonify({"invite": code})
 
 # ----------------------------
 # INIT
