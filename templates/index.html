@@ -6,10 +6,10 @@
 
 <style>
 body {
-    margin:0;
     font-family:Arial;
     background:#0b1220;
     color:white;
+    margin:0;
 }
 
 .container {
@@ -18,58 +18,34 @@ body {
     padding:20px;
 }
 
-.header {
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
+input, button {
+    padding:10px;
+    margin:5px;
+    border-radius:6px;
+    border:none;
 }
 
 #chat {
     height:60vh;
     overflow-y:auto;
     background:#111827;
-    padding:15px;
+    padding:10px;
     border-radius:10px;
-    margin-top:10px;
 }
 
 .msg {
     margin:10px 0;
     padding:10px;
     border-radius:8px;
-    white-space:pre-wrap;
 }
 
 .user { background:#2563eb; }
 .bot { background:#374151; }
 
-.inputArea {
-    display:flex;
-    gap:10px;
-    margin-top:10px;
-}
-
-input {
-    flex:1;
-    padding:10px;
-    border:none;
-    border-radius:8px;
-}
-
 button {
-    padding:10px 15px;
-    border:none;
-    border-radius:8px;
     background:#22c55e;
     color:white;
     cursor:pointer;
-}
-
-#keyBox {
-    width:100%;
-    padding:10px;
-    margin-bottom:10px;
-    border-radius:8px;
 }
 </style>
 </head>
@@ -78,61 +54,75 @@ button {
 
 <div class="container">
 
-<div class="header">
 <h2>🧠 IT Copilot SaaS</h2>
-</div>
 
-<input id="apiKey" placeholder="Enter API Key (demo-key-123)" />
+<div>
+<input id="email" placeholder="email">
+<input id="password" placeholder="password" type="password">
+<button onclick="signup()">Sign Up</button>
+<button onclick="login()">Login</button>
+</div>
 
 <div id="chat"></div>
 
-<div class="inputArea">
-<input id="input" placeholder="Describe IT issue..." />
+<input id="input" placeholder="Ask IT issue">
 <button onclick="send()">Send</button>
-</div>
 
 </div>
 
 <script>
 
+let userId = null;
 let sessionId = localStorage.getItem("sessionId");
 
-const chat = document.getElementById("chat");
-const input = document.getElementById("input");
-
 function add(text, cls){
-    const div = document.createElement("div");
-    div.className = "msg " + cls;
-    div.textContent = text;
-    chat.appendChild(div);
+    const d = document.createElement("div");
+    d.className = "msg " + cls;
+    d.textContent = text;
+    document.getElementById("chat").appendChild(d);
+}
+
+async function signup(){
+    await fetch("/signup", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+            email: email.value,
+            password: password.value
+        })
+    });
+}
+
+async function login(){
+    const res = await fetch("/login", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+            email: email.value,
+            password: password.value
+        })
+    });
+
+    const data = await res.json();
+    userId = data.user_id;
 }
 
 async function send(){
 
-    const msg = input.value.trim();
-    if(!msg) return;
-
-    add(msg, "user");
-    input.value = "";
-
-    const apiKey = document.getElementById("apiKey").value;
+    const msg = input.value;
+    add(msg,"user");
 
     const res = await fetch("/ask", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
             message: msg,
-            session_id: sessionId,
-            api_key: apiKey
+            user_id: userId,
+            session_id: sessionId
         })
     });
 
     const data = await res.json();
-
-    if(data.error){
-        add("❌ " + data.error, "bot");
-        return;
-    }
 
     sessionId = data.session_id;
     localStorage.setItem("sessionId", sessionId);
