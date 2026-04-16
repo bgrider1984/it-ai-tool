@@ -4,9 +4,10 @@ from dotenv import load_dotenv
 
 env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=env_path)
-print("DEBUG API KEY:", os.getenv("OPENAI_API_KEY"))
 
 import os
+print("DEBUG API KEY:", os.getenv("OPENAI_API_KEY"))
+
 from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
 import json
