@@ -14,14 +14,6 @@ body {
     height:100vh;
 }
 
-/* SIDEBAR */
-.sidebar {
-    width:260px;
-    background:#111827;
-    padding:10px;
-}
-
-/* MAIN */
 .main {
     flex:1;
     display:flex;
@@ -31,6 +23,8 @@ body {
 .header {
     padding:10px;
     background:#111827;
+    display:flex;
+    justify-content:space-between;
 }
 
 #chat {
@@ -41,26 +35,17 @@ body {
     flex-direction:column;
 }
 
-/* 🔥 FIXED CHAT BUBBLES */
 .msg {
     display:inline-block;
     max-width:70%;
-    padding:10px 12px;
+    padding:10px;
     margin:6px 0;
-    border-radius:12px;
-    word-wrap:break-word;
+    border-radius:10px;
     white-space:pre-wrap;
 }
 
-.user {
-    background:#2563eb;
-    align-self:flex-end;
-}
-
-.bot {
-    background:#374151;
-    align-self:flex-start;
-}
+.user { background:#2563eb; align-self:flex-end; }
+.bot { background:#374151; align-self:flex-start; }
 
 .input-area {
     display:flex;
@@ -71,32 +56,28 @@ body {
 input {
     flex:1;
     padding:10px;
-    border:none;
     border-radius:6px;
+    border:none;
 }
 
 button {
     margin-left:10px;
-    padding:10px 15px;
+    padding:10px;
     background:#22c55e;
     border:none;
     color:white;
-    cursor:pointer;
     border-radius:6px;
+    cursor:pointer;
 }
 </style>
 </head>
 
 <body>
 
-<div class="sidebar">
-    <h3>IT Copilot</h3>
-</div>
-
 <div class="main">
 
 <div class="header">
-    <div>AI Troubleshooter</div>
+    <div>IT Copilot</div>
     <button onclick="logout()">Logout</button>
 </div>
 
@@ -118,7 +99,6 @@ function add(text, cls){
     document.getElementById("chat").appendChild(div);
 }
 
-/* ENTER KEY FIX */
 document.addEventListener("keydown", function(e){
     if(e.key === "Enter" && document.activeElement.id === "input"){
         send();
@@ -129,20 +109,27 @@ async function send(){
 
     const input = document.getElementById("input");
     const msg = input.value.trim();
+
     if(!msg) return;
 
     input.value = "";
+
     add(msg, "user");
 
-    const res = await fetch("/ask", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        credentials:"include",
-        body: JSON.stringify({message: msg})
-    });
+    try {
+        const res = await fetch("/ask", {
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({message: msg})
+        });
 
-    const data = await res.json();
-    add(data.response, "bot");
+        const data = await res.json();
+
+        add(data.response || "No response received", "bot");
+
+    } catch (err) {
+        add("Network error. Please try again.", "bot");
+    }
 }
 
 function logout(){
