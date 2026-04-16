@@ -24,8 +24,6 @@ try:
 except Exception:
     knowledge_base = []
 
-import numpy as np
-
 def simple_similarity(a, b):
     a_words = set(a.lower().split())
     b_words = set(b.lower().split())
