@@ -12,7 +12,11 @@ body {
     color:white;
 }
 
-.container { max-width:900px; margin:auto; padding:20px; }
+.container {
+    max-width:900px;
+    margin:auto;
+    padding:20px;
+}
 
 #chat {
     height:70vh;
@@ -48,22 +52,25 @@ body {
 .medium { background:#eab308; }
 .low { background:#ef4444; }
 
-.feedback-btn {
-    margin-top:8px;
-    margin-right:6px;
-    padding:6px 10px;
-    border:none;
-    border-radius:6px;
-    cursor:pointer;
-    background:#3b82f6;
-    color:white;
+.inputArea {
+    display:flex;
+    gap:10px;
+    margin-top:10px;
 }
 
-.inputArea { display:flex; gap:10px; margin-top:10px; }
+input {
+    flex:1;
+    padding:10px;
+    border-radius:8px;
+    border:none;
+}
 
-input { flex:1; padding:10px; border-radius:8px; border:none; }
-
-button.send { padding:10px 16px; background:#22c55e; border:none; border-radius:8px; }
+button.send {
+    padding:10px 16px;
+    background:#22c55e;
+    border:none;
+    border-radius:8px;
+}
 </style>
 </head>
 
@@ -91,7 +98,7 @@ input.addEventListener("keydown", e => {
     if(e.key === "Enter") send();
 });
 
-function add(text, type, fixes=[], feedback=false, fixName=null){
+function add(text, type, fixes=[]){
     const div = document.createElement("div");
     div.className = "msg " + type;
     div.textContent = text;
@@ -99,61 +106,18 @@ function add(text, type, fixes=[], feedback=false, fixName=null){
     fixes.forEach(fix => {
         const btn = document.createElement("button");
         btn.className = "fix-btn " + fix.confidence.toLowerCase();
-        btn.textContent = `${fix.label} (${fix.confidence})`;
-        btn.onclick = () => runFix(fix.name);
+        btn.textContent = fix.label;
+        btn.onclick = () => alert("Running: " + fix.name);
         div.appendChild(document.createElement("br"));
         div.appendChild(btn);
     });
-
-    if(feedback && fixName){
-        const yes = document.createElement("button");
-        yes.className = "feedback-btn";
-        yes.textContent = "👍 Worked";
-        yes.onclick = () => sendFeedback(fixName, "yes");
-
-        const no = document.createElement("button");
-        no.className = "feedback-btn";
-        no.textContent = "👎 Didn't work";
-        no.onclick = () => sendFeedback(fixName, "no");
-
-        div.appendChild(document.createElement("br"));
-        div.appendChild(yes);
-        div.appendChild(no);
-    }
 
     chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
 }
 
-async function runFix(fix){
-    const res = await fetch("/ask", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-            run_fix: fix,
-            session_id: sessionId
-        })
-    });
-
-    const data = await res.json();
-    add(data.response, "bot", [], data.ask_feedback, data.current_fix);
-}
-
-async function sendFeedback(fix, result){
-    const res = await fetch("/ask", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-            feedback: {fix, result},
-            session_id: sessionId
-        })
-    });
-
-    const data = await res.json();
-    add(data.response, "bot", data.fixes || [], data.ask_feedback, data.current_fix);
-}
-
 async function send(){
+
     const msg = input.value.trim();
     if(!msg) return;
 
@@ -174,7 +138,7 @@ async function send(){
     sessionId = data.session_id;
     localStorage.setItem("sessionId", sessionId);
 
-    add(data.response, "bot", data.fixes || [], data.ask_feedback, data.current_fix);
+    add(data.response, "bot", data.fixes || []);
 }
 
 </script>
