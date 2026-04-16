@@ -12,7 +12,7 @@ body {
     background: radial-gradient(circle at top, #0b1220, #05070f);
 }
 
-/* subtle grid */
+/* subtle grid background */
 body::before {
     content: "";
     position: fixed;
@@ -22,7 +22,7 @@ body::before {
         linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
         linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
     background-size: 40px 40px;
-    opacity: 0.15;
+    opacity: 0.12;
     pointer-events: none;
 }
 
@@ -31,12 +31,17 @@ body::before {
     margin: auto;
     padding: 20px;
     position: relative;
-    z-index: 2;
 }
 
 h2 {
     text-align: center;
     color: #93c5fd;
+}
+
+.status {
+    font-size: 12px;
+    opacity: 0.7;
+    margin-bottom: 10px;
 }
 
 /* CHAT */
@@ -93,6 +98,10 @@ button {
     cursor: pointer;
     font-weight: bold;
 }
+
+button:hover {
+    background: #16a34a;
+}
 </style>
 </head>
 
@@ -101,6 +110,8 @@ button {
 <div class="container">
 
 <h2>IT Copilot</h2>
+
+<div class="status" id="status">Session: Not started</div>
 
 <div id="chat"></div>
 
@@ -113,10 +124,11 @@ button {
 
 <script>
 
-let sessionId = null;
+let sessionId = localStorage.getItem("sessionId");
 
 const chat = document.getElementById("chat");
 const input = document.getElementById("input");
+const status = document.getElementById("status");
 
 input.addEventListener("keydown", function(e){
     if(e.key === "Enter"){
@@ -133,6 +145,16 @@ function add(text, type){
     chat.scrollTop = chat.scrollHeight;
 }
 
+function updateStatus(data){
+    if(data.active_flow){
+        status.innerText = "Active Flow: " + data.active_flow;
+    } else if(data.issue_type){
+        status.innerText = "Detected Issue: " + data.issue_type;
+    } else {
+        status.innerText = "Session active";
+    }
+}
+
 async function send(){
 
     const msg = input.value.trim();
@@ -141,20 +163,23 @@ async function send(){
     add(msg,"user");
     input.value = "";
 
-    const res = await fetch("/ask",{
+    const res = await fetch("/ask", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-            message:msg,
-            session_id:sessionId
+            message: msg,
+            session_id: sessionId
         })
     });
 
     const data = await res.json();
 
     sessionId = data.session_id;
+    localStorage.setItem("sessionId", sessionId);
 
-    add(data.response,"bot");
+    add(data.response, "bot");
+
+    updateStatus(data);
 }
 
 </script>
