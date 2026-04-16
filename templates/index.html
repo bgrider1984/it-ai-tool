@@ -1,122 +1,150 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>IT Troubleshooting Assistant</title>
+    <meta charset="UTF-8" />
+    <title>IT Copilot</title>
 
     <style>
         body {
             font-family: Arial, sans-serif;
-            margin: 0;
             background: #0f172a;
             color: white;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
+            margin: 0;
+            padding: 0;
         }
 
-        header {
-            padding: 12px;
-            background: #111827;
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        h1 {
             text-align: center;
-            font-weight: bold;
         }
 
-        #chat {
-            flex: 1;
-            padding: 10px;
-            overflow-y: auto;
-        }
-
-        #options {
-            padding: 10px;
+        #chatBox {
             background: #111827;
-            border-top: 1px solid #374151;
+            padding: 15px;
+            border-radius: 10px;
+            height: 70vh;
+            overflow-y: auto;
+            margin-bottom: 10px;
         }
 
-        .msg {
-            margin: 8px 0;
+        .message {
+            margin: 10px 0;
             padding: 10px;
             border-radius: 8px;
-            max-width: 75%;
             white-space: pre-wrap;
         }
 
         .user {
             background: #2563eb;
-            margin-left: auto;
+            text-align: right;
         }
 
         .bot {
-            background: #1f2937;
+            background: #374151;
+            text-align: left;
         }
 
-        #inputArea {
+        .inputArea {
             display: flex;
-            padding: 10px;
-            background: #111827;
+            gap: 10px;
         }
 
         input {
             flex: 1;
             padding: 10px;
-            border-radius: 5px;
+            border-radius: 8px;
             border: none;
+            font-size: 16px;
         }
 
         button {
-            margin-left: 10px;
-            padding: 10px;
+            padding: 10px 15px;
             border: none;
-            border-radius: 5px;
-            background: #2563eb;
-            color: white;
+            border-radius: 8px;
+            background: #22c55e;
+            color: black;
+            font-weight: bold;
             cursor: pointer;
         }
 
-        select {
-            width: 100%;
-            max-width: 500px;
-            padding: 10px;
-            border-radius: 6px;
-            margin-top: 5px;
+        button:hover {
+            background: #16a34a;
+        }
+
+        .typing {
+            font-style: italic;
+            opacity: 0.7;
         }
     </style>
 </head>
 
 <body>
+<div class="container">
+    <h1>IT Copilot</h1>
 
-<header>🛠 IT Troubleshooting Assistant</header>
+    <div id="chatBox"></div>
 
-<div id="chat"></div>
-<div id="options"></div>
-
-<div id="inputArea">
-    <input id="msg" placeholder="Type your issue..." />
-    <button onclick="sendMessage()">Send</button>
+    <div class="inputArea">
+        <input id="messageInput" type="text" placeholder="Type your issue..." />
+        <button id="sendButton">Send</button>
+    </div>
 </div>
 
 <script>
+let sessionId = null;
 
-let chatHistory = [];
-let sessionId = null; // 🔥 CRITICAL FIX
+const chatBox = document.getElementById("chatBox");
+const input = document.getElementById("messageInput");
+const sendButton = document.getElementById("sendButton");
+
+// ----------------------------
+// ENTER KEY SUPPORT
+// ----------------------------
+input.addEventListener("keypress", function (event) {
+    if (event.key === "Enter") {
+        event.preventDefault();
+        sendMessage();
+    }
+});
+
+// ----------------------------
+// SEND BUTTON
+// ----------------------------
+sendButton.addEventListener("click", sendMessage);
+
+// ----------------------------
+// ADD MESSAGE TO CHAT
+// ----------------------------
+function addMessage(text, sender) {
+    const div = document.createElement("div");
+    div.classList.add("message");
+    div.classList.add(sender);
+    div.textContent = text;
+    chatBox.appendChild(div);
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
 
 // ----------------------------
 // SEND MESSAGE
 // ----------------------------
-async function sendMessage(textOverride = null) {
-    const input = document.getElementById("msg");
-    const text = textOverride || input.value;
+async function sendMessage() {
+    const message = input.value.trim();
+    if (!message) return;
 
-    if (!text) return;
-
+    addMessage(message, "user");
     input.value = "";
 
-    addMessage("user", text);
-
-    chatHistory.push({
-        role: "user",
-        content: text
-    });
+    // typing indicator
+    const typing = document.createElement("div");
+    typing.classList.add("message", "bot", "typing");
+    typing.textContent = "Thinking...";
+    chatBox.appendChild(typing);
+    chatBox.scrollTop = chatBox.scrollHeight;
 
     const res = await fetch("/ask", {
         method: "POST",
@@ -124,87 +152,20 @@ async function sendMessage(textOverride = null) {
             "Content-Type": "application/json"
         },
         body: JSON.stringify({
-            message: text,
-            session_id: sessionId   // 🔥 FIX: persist session
+            message: message,
+            session_id: sessionId
         })
     });
 
     const data = await res.json();
 
-    console.log("FULL RESPONSE:", data);
-
-    // 🔥 SAVE SESSION ID FROM BACKEND
     sessionId = data.session_id;
 
-    addMessage("bot", data.response);
+    // remove typing
+    chatBox.removeChild(typing);
 
-    chatHistory.push({
-        role: "assistant",
-        content: data.response
-    });
-
-    renderOptions(data.options || []);
+    addMessage(data.response, "bot");
 }
-
-// ----------------------------
-// ADD MESSAGE
-// ----------------------------
-function addMessage(role, text) {
-    const chat = document.getElementById("chat");
-
-    const div = document.createElement("div");
-    div.className = "msg " + (role === "user" ? "user" : "bot");
-    div.innerText = text;
-
-    chat.appendChild(div);
-    chat.scrollTop = chat.scrollHeight;
-}
-
-// ----------------------------
-// RENDER OPTIONS
-// ----------------------------
-function renderOptions(options) {
-    const container = document.getElementById("options");
-    container.innerHTML = "";
-
-    if (!options || options.length === 0) return;
-
-    const uniqueOptions = [...new Set(options)];
-
-    const extendedOptions = [
-        ...uniqueOptions.filter(opt => opt !== "I am not sure"),
-        "I am not sure"
-    ];
-
-    const select = document.createElement("select");
-
-    const defaultOpt = document.createElement("option");
-    defaultOpt.text = "Select an option...";
-    defaultOpt.value = "";
-    select.appendChild(defaultOpt);
-
-    extendedOptions.forEach(opt => {
-        const option = document.createElement("option");
-        option.value = opt;
-        option.text = opt;
-        select.appendChild(option);
-    });
-
-    select.onchange = () => {
-        if (!select.value) return;
-
-        if (select.value === "I am not sure") {
-            sendMessage("User is unsure. Rephrase the question and simplify it with examples.");
-        } else {
-            sendMessage(select.value);
-        }
-
-        container.innerHTML = "";
-    };
-
-    container.appendChild(select);
-}
-
 </script>
 
 </body>
