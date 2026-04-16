@@ -1,171 +1,116 @@
 import os
 import json
+import uuid
 from flask import Flask, render_template, request, jsonify
 from openai import OpenAI
 
 app = Flask(__name__)
 
 # ----------------------------
-# API KEY
+# OPENAI
 # ----------------------------
 api_key = os.getenv("OPENAI_API_KEY")
 
 if not api_key:
-    raise RuntimeError("Missing OPENAI_API_KEY environment variable")
+    raise RuntimeError("Missing OPENAI_API_KEY")
 
 client = OpenAI(api_key=api_key)
 
 # ----------------------------
-# LOAD KNOWLEDGE BASE (optional)
+# SIMPLE SESSION STORE (in-memory for now)
 # ----------------------------
-try:
-    with open("knowledge_base.json", "r") as f:
-        knowledge_base = json.load(f)
-except Exception:
-    knowledge_base = []
+sessions = {}
 
 # ----------------------------
-# SIMPLE KNOWLEDGE MATCH
+# TROUBLESHOOTING FLOW (STATE MACHINE)
 # ----------------------------
-def simple_similarity(a, b):
-    a_words = set(a.lower().split())
-    b_words = set(b.lower().split())
-    return len(a_words & b_words) / max(len(a_words), 1)
+FLOW = {
+    "start": {
+        "question": "What type of device are you having issues with?",
+        "options": ["Windows PC", "Mac", "Mobile Phone", "Printer"],
+        "next": "device"
+    },
 
-def find_relevant_knowledge(user_input):
-    scored = []
+    "device": {
+        "question": "What type of issue are you experiencing?",
+        "options": ["Network problem", "Software issue", "Hardware issue", "Other"],
+        "next": "issue_type"
+    },
 
-    for item in knowledge_base:
-        content = item.get("content", "")
-        keywords = " ".join(item.get("keywords", []))
+    "issue_type": {
+        "question": "Is the issue happening to just you or multiple users?",
+        "options": ["Just me", "Multiple users"],
+        "next": "scope"
+    },
 
-        score = simple_similarity(user_input, keywords + " " + content)
+    "scope": {
+        "question": "How long has this issue been happening?",
+        "options": ["Just started", "A few days", "Weeks or longer"],
+        "next": "duration"
+    },
 
-        if score > 0:
-            scored.append((score, content))
+    "duration": {
+        "question": "Final step: Do you see any error messages?",
+        "options": ["Yes", "No"],
+        "next": "final"
+    },
 
-    scored.sort(reverse=True, key=lambda x: x[0])
-
-    return "\n".join([x[1] for x in scored[:3]])
-
-# ----------------------------
-# SYSTEM PROMPT (HARD LOCKED JSON MODE)
-# ----------------------------
-SYSTEM_PROMPT = """
-You are a senior IT troubleshooting assistant.
-
-You operate in a STRICT decision-tree system.
-
-You MUST ALWAYS return VALID JSON in this format:
-
-{
-  "response": "Your question or explanation",
-  "options": ["Option 1", "Option 2", "Option 3"]
+    "final": {
+        "question": "Thank you. I will analyze the issue and provide troubleshooting steps.",
+        "options": [],
+        "next": None
+    }
 }
 
-RULES:
-- Always ask ONE question at a time
-- Always provide 2–4 options when asking a question
-- If enough info is collected, provide solution steps and set options to []
-- NEVER return plain text
-- NEVER break JSON format
-- If unsure, still return valid JSON
-
-IMPORTANT:
-If the user responds to a previous question, continue the troubleshooting flow.
-Do NOT restart or repeat earlier steps.
-"""
-
 # ----------------------------
-# SAFE JSON PARSER
-# ----------------------------
-def parse_ai_response(text):
-    try:
-        return json.loads(text)
-    except Exception:
-        return {
-            "response": text,
-            "options": []
-        }
-
-# ----------------------------
-# ROUTES
+# HOME
 # ----------------------------
 @app.route("/")
 def home():
     return render_template("index.html")
 
-
+# ----------------------------
+# ASK (STATE ENGINE)
+# ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
-    try:
-        data = request.json
-        history = data.get("history", [])
+    data = request.json
+    session_id = data.get("session_id")
 
-        # ----------------------------
-        # IMPORTANT FIX:
-        # Only keep last 2 messages to prevent context drift
-        # ----------------------------
-        trimmed_history = history[-2:]
+    if not session_id or session_id not in sessions:
+        session_id = str(uuid.uuid4())
+        sessions[session_id] = {"step": "start", "history": []}
 
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    session = sessions[session_id]
+    current_step = session["step"]
 
-        # Add trimmed conversation history
-        for msg in trimmed_history:
-            messages.append({
-                "role": msg["role"],
-                "content": msg["content"]
-            })
+    user_input = data.get("message", "").strip()
 
-        # Add contextual knowledge from last user message
-        if trimmed_history:
-            last_user = trimmed_history[-1]["content"]
-            knowledge = find_relevant_knowledge(last_user)
+    # ----------------------------
+    # MOVE FORWARD IN FLOW
+    # ----------------------------
+    if user_input:
+        session["history"].append(user_input)
 
-            if knowledge:
-                messages.append({
-                    "role": "system",
-                    "content": f"Relevant internal knowledge:\n{knowledge}"
-                })
+        # simple step progression
+        next_step = FLOW[current_step]["next"]
 
-        # ----------------------------
-        # OPENAI CALL (STRICT JSON MODE)
-        # ----------------------------
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            max_tokens=400,
-            response_format={"type": "json_object"},
-            messages=messages
-        )
+        # handle final step
+        if next_step:
+            session["step"] = next_step
 
-        raw_reply = response.choices[0].message.content
+        current_step = session["step"]
 
-        parsed = parse_ai_response(raw_reply)
+    node = FLOW[current_step]
 
-        # ----------------------------
-        # USAGE TRACKING
-        # ----------------------------
-        usage = response.usage
-        tokens = usage.total_tokens
-        cost = (usage.prompt_tokens * 0.0000004) + (usage.completion_tokens * 0.0000016)
-
-        return jsonify({
-            "response": parsed.get("response", ""),
-            "options": parsed.get("options", []),
-            "tokens": tokens,
-            "cost": round(cost, 6)
-        })
-
-    except Exception as e:
-        return jsonify({
-            "response": "Server error occurred.",
-            "options": [],
-            "error": str(e)
-        }), 500
-
+    return jsonify({
+        "session_id": session_id,
+        "response": node["question"],
+        "options": node["options"]
+    })
 
 # ----------------------------
-# RUN APP
+# RUN
 # ----------------------------
 if __name__ == "__main__":
     app.run(debug=True)
