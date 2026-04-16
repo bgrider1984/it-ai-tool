@@ -24,45 +24,57 @@ def detect_issues(text):
     if "outlook" in t:
         issues.append("outlook")
     if "vpn" in t or "network" in t:
-        issues.append("vpn")
+        issues.append("network")
     if "login" in t:
         issues.append("login")
 
     return issues if issues else ["general"]
 
 # ----------------------------
-# AI FIX SUGGESTIONS
+# AI FIX GENERATION
 # ----------------------------
-def ai_next_steps(issues, history):
+def ai_next_steps(issues, history, failed_fix=None):
     prompt = f"""
 You are a Tier 2 IT engineer.
 
 Issues: {issues}
 History: {history}
 
+"""
+
+    if failed_fix:
+        prompt += f"""
+The previous fix FAILED: {failed_fix}
+
+Now provide the NEXT best troubleshooting step.
+Avoid repeating the same approach.
+"""
+
+    prompt += """
 Return ONLY JSON:
 
-{{
+{
   "message": "short explanation",
   "fixes": [
-    {{"name": "restart_outlook", "label": "Restart Outlook", "confidence": "High"}},
-    {{"name": "safe_mode", "label": "Open in Safe Mode", "confidence": "Medium"}},
-    {{"name": "new_profile", "label": "Create New Profile", "confidence": "Low"}}
+    {"name": "fix_id", "label": "Fix Name", "confidence": "High"}
   ]
-}}
+}
 """
 
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=300
+        temperature=0.3,
+        max_tokens=350
     )
 
     try:
         return json.loads(response.choices[0].message.content)
     except:
-        return {"message": "Try restarting Outlook.", "fixes": []}
+        return {
+            "message": "Try restarting the application.",
+            "fixes": []
+        }
 
 # ----------------------------
 # FIX INSTRUCTIONS
@@ -80,15 +92,9 @@ def get_fix_instructions(fix):
 3. Press Enter""",
 
         "new_profile": """New Profile:
-1. Control Panel
-2. Mail
-3. Show Profiles
-4. Add new profile""",
-
-        "reset_network": """Reset Network:
-1. Win + R
-2. ncpa.cpl
-3. Disable/Enable adapter"""
+1. Control Panel → Mail
+2. Show Profiles
+3. Add new profile"""
     }
 
     return steps.get(fix, "No instructions available.")
@@ -103,70 +109,74 @@ def home():
 @app.route("/ask", methods=["POST"])
 def ask():
     data = request.json
+
     session_id = data.get("session_id")
-    user_input = data.get("message", "")
+    message = data.get("message", "")
     fix_request = data.get("run_fix")
     feedback = data.get("feedback")
 
     # ----------------------------
-    # CREATE SESSION
+    # SESSION INIT
     # ----------------------------
     if not session_id or session_id not in sessions:
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
             "history": [],
             "issues": [],
-            "last_fix": None,
-            "fix_results": {}
+            "last_fix": None
         }
 
     session = sessions[session_id]
 
     # ----------------------------
-    # FEEDBACK LOOP (NEW)
-    # ----------------------------
-    if feedback:
-        fix = feedback.get("fix")
-        result = feedback.get("result")
-
-        session["fix_results"][fix] = result
-
-        # If failed → continue AI troubleshooting
-        if result == "no":
-            ai_data = ai_next_steps(session["issues"], session["history"])
-            return jsonify({
-                "session_id": session_id,
-                "response": "Got it — continuing troubleshooting...",
-                "fixes": ai_data["fixes"]
-            })
-
-        return jsonify({
-            "session_id": session_id,
-            "response": "Great — issue marked as resolved 🎉",
-            "fixes": []
-        })
-
-    # ----------------------------
     # RUN FIX → SHOW INSTRUCTIONS
     # ----------------------------
     if fix_request:
-        instructions = get_fix_instructions(fix_request)
         session["last_fix"] = fix_request
+        instructions = get_fix_instructions(fix_request)
 
         return jsonify({
             "session_id": session_id,
             "response": instructions,
             "fixes": [],
-            "ask_feedback": True,
-            "current_fix": fix_request
+            "current_fix": fix_request,
+            "ask_feedback": True
         })
 
     # ----------------------------
-    # NORMAL CHAT
+    # FEEDBACK LOOP (AUTO CONTINUE)
     # ----------------------------
-    session["history"].append(user_input)
+    if feedback:
+        fix = feedback.get("fix")
+        result = feedback.get("result")
 
-    detected = detect_issues(user_input)
+        # ❌ FAILED → AUTO CONTINUE TROUBLESHOOTING
+        if result == "no":
+            ai_data = ai_next_steps(
+                session["issues"],
+                session["history"],
+                failed_fix=fix
+            )
+
+            return jsonify({
+                "session_id": session_id,
+                "response": "Got it — that didn’t resolve the issue. Trying next step...",
+                "fixes": ai_data["fixes"]
+            })
+
+        # ✅ SUCCESS
+        return jsonify({
+            "session_id": session_id,
+            "response": "Great — issue resolved 🎉",
+            "fixes": []
+        })
+
+    # ----------------------------
+    # NORMAL CHAT FLOW
+    # ----------------------------
+    session["history"].append(message)
+
+    detected = detect_issues(message)
     session["issues"] = list(set(session["issues"] + detected))
 
     ai_data = ai_next_steps(session["issues"], session["history"])
