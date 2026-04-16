@@ -153,6 +153,9 @@ function renderOptions(options) {
 
     if (!options || options.length === 0) return;
 
+    // ADD UNCERTAINTY OPTION
+    const extendedOptions = [...options, "I am not sure"];
+
     const select = document.createElement("select");
 
     const defaultOpt = document.createElement("option");
@@ -160,7 +163,7 @@ function renderOptions(options) {
     defaultOpt.value = "";
     select.appendChild(defaultOpt);
 
-    options.forEach(opt => {
+    extendedOptions.forEach(opt => {
         const option = document.createElement("option");
         option.value = opt;
         option.text = opt;
@@ -170,7 +173,15 @@ function renderOptions(options) {
     select.onchange = () => {
         if (!select.value) return;
 
-        sendMessage(select.value);
+        const value = select.value;
+
+        // Handle uncertainty explicitly
+        if (value === "I am not sure") {
+            sendMessage("User is unsure. Rephrase the question and explain it in simpler terms with examples.");
+        } else {
+            sendMessage(value);
+        }
+
         container.innerHTML = "";
     };
 
