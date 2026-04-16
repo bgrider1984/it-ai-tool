@@ -122,9 +122,11 @@ async function sendMessage(textOverride=null) {
         content: data.response
     });
 
-    if (data.options && data.options.length > 0) {
-        renderOptions(data.options);
-    }
+    console.log("OPTIONS RECEIVED:", data.options);
+
+if (Array.isArray(data.options) && data.options.length > 0) {
+    renderOptions(data.options);
+}
 }
 
 function addMessage(role, text) {
