@@ -49,9 +49,9 @@ def update_slots(msg, state):
     elif "restart" in t:
         state["slots"]["trigger"] = "restart"
 
-    if "error" in t:
+    if "error" in t or "crash" in t:
         state["slots"]["error"] = "yes"
-    elif "none" in t:
+    elif "none" in t or "no error" in t:
         state["slots"]["error"] = "no"
 
     state["history"].append(msg.lower())
@@ -66,45 +66,68 @@ def stoplight(slots):
 
     results = []
 
-    # SYSTEM WIDE + UPDATE
     if slots["scope"] == "all" and slots["trigger"] == "update":
-        results.append(("🟢", "Windows update caused system shell issue"))
-        results.append(("🟡", "User profile corruption"))
+        results.append(("🟢", "Windows update may have affected system processes"))
+        results.append(("🟡", "User profile or permissions issue"))
         results.append(("🔴", "Hardware failure"))
 
-    # SYSTEM WIDE ONLY
     elif slots["scope"] == "all":
-        results.append(("🟢", "Startup/service issue"))
-        results.append(("🟡", "User profile corruption"))
+        results.append(("🟢", "Startup or system service issue"))
+        results.append(("🟡", "Profile corruption"))
         results.append(("🔴", "Disk failure"))
 
-    # SINGLE APP
     elif slots["scope"] == "one":
-        results.append(("🟢", "App corruption or install issue"))
+        results.append(("🟢", "Application corruption"))
         results.append(("🟡", "Permissions issue"))
-        results.append(("🔴", "OS-level corruption"))
+        results.append(("🔴", "Operating system issue"))
 
     else:
-        results.append(("🟢", "Need more info to classify issue"))
+        results.append(("🟢", "More information needed"))
 
     return results
 
 # ----------------------------
-# ROOT FIX ENGINE (KEEP IT SIMPLE FIRST)
+# DETAILED STEP ENGINE
 # ----------------------------
-def simple_fix(state):
+def restart_step():
+    return (
+        "Step 1: Restart your computer\n\n"
 
-    if not state.get("restart_done"):
-        state["restart_done"] = True
+        "What to do:\n"
+        "• Click the Start Menu\n"
+        "• Select the Power icon\n"
+        "• Click 'Restart'\n\n"
 
-        return (
-            "Step 1 (K.I.S.S.):\n"
-            "👉 Restart your computer completely\n"
-            "Then try opening your apps again.\n\n"
-            "Tell me: Did that fix it?"
-        )
+        "Important:\n"
+        "• Do NOT shut down — use Restart specifically\n\n"
 
-    return "Now let's continue troubleshooting based on results."
+        "What this does:\n"
+        "• Clears temporary memory issues\n"
+        "• Restarts all system services\n"
+        "• Fixes many app launch problems\n\n"
+
+        "After it turns back on:\n"
+        "• Try opening the apps again\n\n"
+
+        "Tell me: Did the apps open successfully after the restart?"
+    )
+
+def task_manager_step():
+    return (
+        "Next Step: Check system usage in Task Manager\n\n"
+
+        "How to open it:\n"
+        "• Press Ctrl + Shift + Esc\n\n"
+
+        "What to look for:\n"
+        "• CPU usage — is it near 100%?\n"
+        "• Memory usage — is it near full?\n\n"
+
+        "What it means:\n"
+        "• High CPU or memory can prevent apps from opening\n\n"
+
+        "Tell me what you see (CPU % and Memory %)."
+    )
 
 # ----------------------------
 # ROUTES
@@ -146,49 +169,57 @@ def ask():
     state, missing = update_slots(msg, state)
 
     # ----------------------------
-    # STEP 1: ALWAYS START SIMPLE
+    # HANDLE "HOW DO I" QUESTIONS
+    # ----------------------------
+    if "task manager" in msg.lower():
+        return jsonify({"response": task_manager_step()})
+
+    # ----------------------------
+    # STEP 0: ALWAYS START WITH RESTART
     # ----------------------------
     if state["step"] == 0:
         state["step"] = 1
-        return jsonify({
-            "response": simple_fix(state)
-        })
+        return jsonify({"response": restart_step()})
 
     # ----------------------------
-    # STEP 2: IF USER CONFIRMS ISSUE STILL EXISTS
+    # STEP 1: AFTER RESTART RESULT
     # ----------------------------
     if state["step"] == 1:
 
-        if "yes" in msg.lower() or "still" in msg.lower():
+        if "yes" in msg.lower() or "fixed" in msg.lower():
+            return jsonify({
+                "response": "Great — that confirms it was a temporary system issue. Let me know if it happens again."
+            })
+
+        if "no" in msg.lower() or "still" in msg.lower():
             state["step"] = 2
 
             lights = stoplight(state["slots"])
-
             formatted = "\n".join([f"{c} {t}" for c, t in lights])
 
             return jsonify({
                 "response":
-                    "Okay, let's go deeper.\n\n"
-                    "Possible causes:\n" + formatted + "\n\n"
-                    "Tell me what changed recently or what you observed."
+                    "Since the restart did not fix it, here are the most likely causes:\n\n"
+                    + formatted +
+                    "\n\nNext, we’ll check system resource usage."
             })
 
         return jsonify({
-            "response": "Great — seems like the restart may have helped. Let me know if it happens again."
+            "response": "After restarting, did the apps open or is the issue still happening?"
         })
 
     # ----------------------------
-    # STEP 3: FINAL DIAGNOSIS
+    # STEP 2: NEXT ACTION
     # ----------------------------
-    lights = stoplight(state["slots"])
+    if state["step"] == 2:
+        state["step"] = 3
+        return jsonify({"response": task_manager_step()})
 
-    formatted = "\n".join([f"{c} {t}" for c, t in lights])
-
+    # ----------------------------
+    # FINAL FALLBACK
+    # ----------------------------
     return jsonify({
-        "response":
-            "Final Diagnostic Overview:\n\n" +
-            formatted +
-            "\n\nNext step: describe what you see when trying to open the apps."
+        "response": "Continue describing what you're seeing and I’ll guide you step-by-step."
     })
 
 # ----------------------------
