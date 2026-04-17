@@ -1,245 +1,219 @@
 import os
 import uuid
-from flask import Flask, request, jsonify, session, render_template
+from datetime import datetime
+from flask import Flask, request, jsonify, session, redirect, render_template
+from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
+
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = True
+
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///local.db")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+db = SQLAlchemy(app)
+
 # ----------------------------
-# SESSION STORE (in-memory)
+# USERS / INVITES (BETA SIMPLE)
 # ----------------------------
+USERS = {
+    "admin@local": {"password": "admin", "is_admin": True}
+}
+
+INVITES = set()
+
+# ----------------------------
+# CHAT HISTORY MODEL
+# ----------------------------
+class ChatHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user = db.Column(db.String(120))
+    role = db.Column(db.String(20))
+    message = db.Column(db.Text)
+    session_id = db.Column(db.String(80))
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+# ----------------------------
+# SESSION MEMORY (IN-MEMORY INDEX)
+# ----------------------------
+SESSION_INDEX = {}
+
 sessions = {}
-
-def get_sid():
-    if "sid" not in session:
-        sid = str(uuid.uuid4())
-        session["sid"] = sid
-
-        sessions[sid] = {
-            "step": 0,
-            "status": "active",
-            "flow": None
-        }
-
-    return session["sid"]
 
 # ----------------------------
 # HELPERS
 # ----------------------------
-def is_yes(msg):
-    return any(x in msg for x in ["yes", "y", "yeah", "yep", "fixed", "works", "good"])
+def get_session_title(message):
+    t = message.lower()
+    if "vpn" in t:
+        return "VPN Issue"
+    if "outlook" in t:
+        return "Outlook Issue"
+    if "login" in t:
+        return "Login Issue"
+    if "crash" in t:
+        return "System Crash"
+    if "slow" in t:
+        return "Performance Issue"
+    return "General IT Issue"
 
-def is_no(msg):
-    return any(x in msg for x in ["no", "n", "nope", "still", "not"])
+def get_session():
+    sid = session.get("sid")
 
-def is_working(msg):
-    return any(x in msg for x in ["works", "working", "fine", "ok", "okay", "resolved"])
+    if not sid:
+        sid = str(uuid.uuid4())
+        session["sid"] = sid
+        sessions[sid] = {"step": 0, "history": []}
 
-# ----------------------------
-# FLOW DETECTION
-# ----------------------------
-def detect_flow(msg):
-    msg = msg.lower()
-    if "keyboard" in msg:
-        return "keyboard"
-    return "general"
-
-# ----------------------------
-# STEPS (KEYBOARD FLOW)
-# ----------------------------
-def step_text(step):
-    steps = {
-        1: "Step 1: Check keyboard power\n• Replace batteries\n• Make sure keyboard is ON\n\nDid that fix the issue?",
-        2: "Step 2: Check wireless interference\n• Move keyboard closer\n• Remove nearby wireless devices\n\nIs the issue still happening?",
-        3: "Step 3: Try another USB port\n• Plug receiver into different USB port\n\nDid that fix the issue?",
-        4: "Step 4: Update keyboard driver\n• Device Manager → Keyboards\n• Update driver\n• Restart PC\n\nDid that fix the issue?",
-        5: "Step 5: Hardware test\n• Test keyboard on another computer\n\nTell me what happened."
-    }
-    return steps.get(step, "Let’s continue troubleshooting.")
+    return sid
 
 # ----------------------------
-# MAIN CHAT ENGINE
+# ROUTES
+# ----------------------------
+@app.route("/")
+def home():
+    return render_template("index.html")
+
+@app.route("/dashboard")
+def dashboard():
+    if not session.get("user"):
+        return redirect("/")
+    return render_template("dashboard.html")
+
+# ----------------------------
+# LOGIN (BETA SIMPLE)
+# ----------------------------
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.json
+
+    user = USERS.get(data.get("email"))
+
+    if not user or user["password"] != data.get("password"):
+        return jsonify({"error": "invalid login"}), 401
+
+    session["user"] = data.get("email")
+    session.modified = True
+
+    return jsonify({"status": "ok"})
+
+# ----------------------------
+# ASK (COPILOT RESPONSE + HISTORY SAVE)
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
 
-    msg = (request.json.get("message") or "").lower()
+    if not session.get("user"):
+        return jsonify({"error": "unauthorized"}), 401
 
-    sid = get_sid()
-    state = sessions[sid]
+    data = request.json
+    message = data.get("message", "")
 
-    # initialize flow
-    if state["flow"] is None:
-        state["flow"] = detect_flow(msg)
+    sid = get_session()
 
-    # ----------------------------
-    # STEP 0 → START
-    # ----------------------------
-    if state["step"] == 0:
-        state["step"] = 1
-        return jsonify({
-            "step": 1,
-            "response": step_text(1),
-            "options": ["Yes", "No"]
-        })
+    # create session index entry if new
+    if sid not in SESSION_INDEX:
+        SESSION_INDEX[sid] = {
+            "title": get_session_title(message),
+            "created": str(datetime.utcnow())
+        }
 
-    # ----------------------------
-    # STEP 1
-    # ----------------------------
-    if state["step"] == 1:
+    # simple AI logic (beta)
+    msg = message.lower()
 
-        if is_yes(msg):
-            return jsonify({
-                "status": "resolved",
-                "response": "Great — glad it’s fixed 👍",
-                "options": ["New issue"]
-            })
+    if "vpn" in msg:
+        reply = "Check VPN connection → reconnect client."
+    elif "outlook" in msg:
+        reply = "Restart Outlook → try Safe Mode."
+    elif "crash" in msg:
+        reply = "Check Task Manager → CPU/RAM usage."
+    elif "slow" in msg:
+        reply = "Check disk usage and background processes."
+    else:
+        reply = "Restart device and re-test issue."
 
-        state["step"] = 2
-        return jsonify({
-            "step": 2,
-            "response": step_text(2),
-            "options": ["Yes", "No"]
-        })
+    # SAVE USER MESSAGE
+    db.session.add(ChatHistory(
+        user=session["user"],
+        role="user",
+        message=message,
+        session_id=sid
+    ))
 
-    # ----------------------------
-    # STEP 2
-    # ----------------------------
-    if state["step"] == 2:
+    # SAVE ASSISTANT MESSAGE
+    db.session.add(ChatHistory(
+        user=session["user"],
+        role="assistant",
+        message=reply,
+        session_id=sid
+    ))
 
-        if is_yes(msg):  # still happening
-            state["step"] = 3
-            return jsonify({
-                "step": 3,
-                "response": step_text(3),
-                "options": ["Yes", "No"]
-            })
-
-        return jsonify({
-            "status": "resolved",
-            "response": "Great — interference was likely the cause 👍",
-            "options": ["New issue"]
-        })
-
-    # ----------------------------
-    # STEP 3
-    # ----------------------------
-    if state["step"] == 3:
-
-        if is_yes(msg):
-            return jsonify({
-                "status": "resolved",
-                "response": "Great — issue fixed 👍",
-                "options": ["New issue"]
-            })
-
-        state["step"] = 4
-        return jsonify({
-            "step": 4,
-            "response": step_text(4),
-            "options": ["Yes", "No"]
-        })
-
-    # ----------------------------
-    # STEP 4
-    # ----------------------------
-    if state["step"] == 4:
-
-        if is_yes(msg):
-            return jsonify({
-                "status": "resolved",
-                "response": "Driver update fixed it 👍",
-                "options": ["New issue"]
-            })
-
-        state["step"] = 5
-        return jsonify({
-            "step": 5,
-            "response": step_text(5),
-            "options": ["Worked", "Did not work"]
-        })
-
-    # ----------------------------
-    # STEP 5 (IMPORTANT FIX HERE)
-    # ----------------------------
-    if state["step"] == 5:
-
-        # FIXED: proper recognition of success
-        if is_working(msg) or is_yes(msg):
-            state["step"] = 6
-            return jsonify({
-                "status": "escalated",
-                "response":
-                    "Great — the keyboard works on another computer.\n\n"
-                    "This confirms the issue is with your PC.\n\n"
-                    "Next steps:\n"
-                    "• USB power settings reset\n"
-                    "• Reinstall USB drivers\n"
-                    "• Try different USB ports\n\n"
-                    "Do you want help fixing your PC?",
-                "options": ["Yes", "No"]
-            })
-
-        if is_no(msg):
-            return jsonify({
-                "status": "resolved",
-                "response": "That suggests a hardware failure — replace keyboard.",
-                "options": ["New issue"]
-            })
-
-        return jsonify({
-            "step": 5,
-            "response": step_text(5),
-            "options": ["Worked", "Still broken"]
-        })
-
-    # ----------------------------
-    # STEP 6 (ESCALATION)
-    # ----------------------------
-    if state["step"] == 6:
-
-        if is_yes(msg):
-            return jsonify({
-                "response":
-                    "Step 1: Reset USB power settings\n"
-                    "• Open Device Manager\n"
-                    "• Expand USB Controllers\n"
-                    "• Disable power saving\n\n"
-                    "Try again and tell me if it works.",
-                "options": ["Done", "Still broken"]
-            })
-
-        if is_no(msg):
-            return jsonify({
-                "status": "resolved",
-                "response": "Okay — feel free to start a new issue anytime 👍",
-                "options": ["New issue"]
-            })
-
-        return jsonify({
-            "response": "Do you want help fixing the PC issue?",
-            "options": ["Yes", "No"]
-        })
+    db.session.commit()
 
     return jsonify({
-        "response": "Tell me what’s going on and I’ll help."
+        "response": reply,
+        "session_id": sid
     })
 
 # ----------------------------
-# ROUTES (FIXED)
+# LIST SESSIONS (SIDEBAR)
 # ----------------------------
-@app.route("/")
-def home():
-    return render_template("dashboard.html")
+@app.route("/sessions")
+def sessions_list():
 
-@app.route("/dashboard")
-def dashboard():
-    return render_template("dashboard.html")
+    if not session.get("user"):
+        return jsonify({"error": "unauthorized"}), 401
 
+    return jsonify([
+        {
+            "session_id": sid,
+            "title": data["title"],
+            "created": data["created"]
+        }
+        for sid, data in SESSION_INDEX.items()
+    ])
+
+# ----------------------------
+# LOAD SESSION HISTORY
+# ----------------------------
+@app.route("/load_session/<sid>")
+def load_session(sid):
+
+    if not session.get("user"):
+        return jsonify({"error": "unauthorized"}), 401
+
+    chats = ChatHistory.query.filter_by(
+        session_id=sid
+    ).order_by(ChatHistory.timestamp.asc()).all()
+
+    return jsonify([
+        {
+            "role": c.role,
+            "message": c.message
+        }
+        for c in chats
+    ])
+
+# ----------------------------
+# HEALTH
+# ----------------------------
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({
+        "status": "ok",
+        "users": len(USERS),
+        "sessions": len(SESSION_INDEX),
+        "history_rows": ChatHistory.query.count()
+    })
 
 # ----------------------------
+# INIT DB
+# ----------------------------
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
+
     app.run(host="0.0.0.0", port=10000)
