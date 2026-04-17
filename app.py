@@ -9,24 +9,22 @@ sessions = {}
 USERS = {"admin@local": "admin"}
 
 # ----------------------------
-# SESSION INIT
+# SESSION
 # ----------------------------
 def get_sid():
     if "sid" not in session:
         sid = str(uuid.uuid4())
         session["sid"] = sid
-
         sessions[sid] = {
             "step": 0,
-            "flow": None,
             "last_q": None,
-            "last_response": ""
+            "last_response": "",
+            "locked": False
         }
-
     return session["sid"]
 
 # ----------------------------
-# INTENT HELPERS
+# CLASSIFIERS
 # ----------------------------
 def is_yes(msg):
     return any(x in msg for x in ["yes", "y", "yeah", "yep"])
@@ -34,24 +32,23 @@ def is_yes(msg):
 def is_no(msg):
     return any(x in msg for x in ["no", "n", "nope", "still", "not"])
 
-def is_positive_result(msg):
-    return any(x in msg for x in [
-        "it works", "works", "fine", "ok", "okay", "good", "fixed", "resolved"
-    ])
+def is_positive(msg):
+    return any(x in msg for x in ["worked", "works", "fine", "ok", "good", "fixed"])
 
-def safe_response(state, text):
-    if state["last_response"] == text:
-        return text + "\n\nAre you still seeing the issue?"
+# ----------------------------
+# HARD LOCK GUARD
+# ----------------------------
+def respond(state, text):
+    """
+    Ensures ONLY ONE response per request.
+    Prevents repeated looping output.
+    """
+    if state["locked"]:
+        return None
+
+    state["locked"] = True
     state["last_response"] = text
     return text
-
-# ----------------------------
-# FLOW DETECTION
-# ----------------------------
-def detect_flow(msg):
-    if "keyboard" in msg:
-        return "keyboard"
-    return "keyboard"
 
 # ----------------------------
 # STEPS
@@ -68,42 +65,43 @@ def step2():
     return (
         "Step 2: Check signal interference\n\n"
         "• Move keyboard closer\n"
-        "• Remove nearby wireless devices\n\n"
-        "Is the issue still happening?"
+        "• Remove wireless devices\n\n"
+        "Is it still happening?"
     )
 
 def step3():
     return (
-        "Step 3: Try a different USB port\n\n"
-        "• Plug receiver into another port\n\n"
+        "Step 3: Try another USB port\n\n"
+        "• Plug receiver into different port\n\n"
         "Did that fix the issue?"
     )
 
 def step4():
     return (
-        "Step 4: Update keyboard driver\n\n"
+        "Step 4: Update driver\n\n"
         "• Device Manager → Keyboards\n"
-        "• Update driver\n\n"
-        "Restart PC\n\n"
+        "• Update driver\n"
+        "• Restart PC\n\n"
         "Did that fix the issue?"
     )
 
 def step5():
     return (
         "Step 5: Hardware test\n\n"
-        "• Plug keyboard into another computer\n\n"
+        "• Test keyboard on another computer\n\n"
         "Tell me what happened."
     )
 
 def final_fix():
     return (
-        "Great — since it works on another computer, the keyboard is OK.\n\n"
-        "This means the issue is with your PC configuration.\n\n"
+        "Great — since it works on another computer:\n\n"
+        "✔ Keyboard hardware is GOOD\n"
+        "❌ Issue is with your PC\n\n"
         "Next steps:\n"
-        "• Reinstall USB drivers\n"
-        "• Check USB power settings\n"
-        "• Try different USB port types\n\n"
-        "Do you want me to walk you through fixing the PC side next?"
+        "• USB power settings reset\n"
+        "• Driver reinstall\n"
+        "• Try different USB port\n\n"
+        "Do you want help fixing the PC side?"
     )
 
 # ----------------------------
@@ -117,88 +115,79 @@ def ask():
     sid = get_sid()
     state = sessions[sid]
 
-    if state["flow"] is None:
-        state["flow"] = detect_flow(msg)
+    # RESET LOCK EACH REQUEST (IMPORTANT)
+    state["locked"] = False
+
+    # ============================
+    # STEP 0 → STEP 1
+    # ============================
+    if state["step"] == 0:
+        state["step"] = 1
+        return jsonify({"response": respond(state, step1())})
 
     # ============================
     # STEP 1
     # ============================
-    if state["step"] == 0:
-        state["step"] = 1
-        state["last_q"] = "fixed"
-        return jsonify({"response": safe_response(state, step1())})
+    if state["step"] == 1:
+        if is_yes(msg):
+            return jsonify({"response": respond(state, "Great — issue resolved 👍")})
+
+        state["step"] = 2
+        return jsonify({"response": respond(state, step2())})
 
     # ============================
     # STEP 2
     # ============================
-    if state["step"] == 1:
-        if is_yes(msg):
-            return jsonify({"response": "Great — issue resolved."})
+    if state["step"] == 2:
+        if is_yes(msg):  # still happening
+            state["step"] = 3
+            return jsonify({"response": respond(state, step3())})
 
-        state["step"] = 2
-        state["last_q"] = "still"
-        return jsonify({"response": safe_response(state, step2())})
+        return jsonify({"response": respond(state, "Good — issue appears resolved.")})
 
     # ============================
     # STEP 3
     # ============================
-    if state["step"] == 2:
-        if is_yes(msg):  # still happening
-            state["step"] = 3
-            state["last_q"] = "fixed"
-            return jsonify({"response": safe_response(state, step3())})
+    if state["step"] == 3:
+        if is_yes(msg):
+            return jsonify({"response": respond(state, "Fixed 👍")})
 
-        return jsonify({"response": "Good — interference fixed it."})
+        state["step"] = 4
+        return jsonify({"response": respond(state, step4())})
 
     # ============================
     # STEP 4
     # ============================
-    if state["step"] == 3:
-        if is_yes(msg):
-            return jsonify({"response": "Great — issue resolved."})
-
-        state["step"] = 4
-        return jsonify({"response": safe_response(state, step4())})
-
-    # ============================
-    # STEP 5
-    # ============================
     if state["step"] == 4:
-        if is_positive_result(msg):
-            state["step"] = 5
-            return jsonify({"response": safe_response(state, step5())})
+        if is_yes(msg):
+            return jsonify({"response": respond(state, "Driver fix worked 👍")})
 
-        if is_no(msg):
-            state["step"] = 5
-            return jsonify({"response": safe_response(state, step5())})
-
-        return jsonify({"response": "Tell me what happened when you tested it."})
+        state["step"] = 5
+        return jsonify({"response": respond(state, step5())})
 
     # ============================
-    # FINAL STEP (FIXED LOGIC)
+    # STEP 5 (CRITICAL FIX HERE)
     # ============================
     if state["step"] == 5:
 
-        if is_positive_result(msg):
+        # FIXED: ANY positive result = FINALIZE immediately
+        if is_positive(msg):
             state["step"] = 6
-            return jsonify({"response": final_fix()})
+            return jsonify({"response": respond(state, final_fix())})
 
-        if "still" in msg or is_no(msg):
-            return jsonify({
-                "response": "That confirms a hardware issue — the keyboard likely needs replacement."
-            })
+        if is_no(msg):
+            return jsonify({"response": respond(state, "That suggests hardware failure — replacement likely needed.")})
 
-        # CRITICAL FIX: stop looping same question
-        return jsonify({
-            "response": "Just to confirm — did it work correctly on the other computer?"
-        })
+        # IMPORTANT: no repetition loop allowed anymore
+        state["step"] = 6
+        return jsonify({"response": respond(state, final_fix())})
 
     # ============================
     # END STATE
     # ============================
     if state["step"] >= 6:
         return jsonify({
-            "response": "We’ve completed troubleshooting. Let me know if you want deeper PC diagnostics."
+            "response": "Troubleshooting complete. Let me know if you want to fix another issue."
         })
 
     return jsonify({"response": "Tell me more about the issue."})
