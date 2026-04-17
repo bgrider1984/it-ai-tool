@@ -28,26 +28,43 @@ body {
     padding:15px;
     border-radius:10px;
     height:60vh;
-    overflow:auto;
+    overflow-y:auto;
 }
 
 .msg {
     margin:10px 0;
     padding:10px;
     border-radius:8px;
+    word-wrap:break-word;
 }
 
 .user { background:#2563eb; }
 .bot { background:#374151; }
 
-button {
-    margin:5px;
+.input-area {
+    display:flex;
+    margin-top:10px;
+}
+
+input {
+    flex:1;
     padding:10px;
+    border:none;
+    border-radius:6px;
+}
+
+button {
+    margin-left:10px;
+    padding:10px 15px;
     border:none;
     border-radius:6px;
     cursor:pointer;
     background:#22c55e;
     color:white;
+}
+
+button:hover {
+    background:#16a34a;
 }
 
 .stepbox {
@@ -74,8 +91,10 @@ button {
 
 <div class="chat" id="chat"></div>
 
-<input id="input" placeholder="Describe issue..." style="width:70%;padding:10px;">
-<button onclick="send()">Send</button>
+<div class="input-area">
+    <input id="input" placeholder="Describe issue..." />
+    <button onclick="sendMessage()">Send</button>
+</div>
 
 <div id="buttons"></div>
 
@@ -83,48 +102,93 @@ button {
 
 <script>
 
-function add(text, cls){
-    const d = document.createElement("div");
-    d.className = "msg " + cls;
-    d.textContent = text;
-    document.getElementById("chat").appendChild(d);
+const chat = document.getElementById("chat");
+const input = document.getElementById("input");
+
+// ----------------------------
+// ADD MESSAGE
+// ----------------------------
+function addMessage(text, cls){
+    const div = document.createElement("div");
+    div.className = "msg " + cls;
+    div.textContent = text;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
 }
 
+// ----------------------------
+// RENDER BUTTONS
+// ----------------------------
 function renderButtons(options){
     const box = document.getElementById("buttons");
     box.innerHTML = "";
-    options.forEach(o=>{
+
+    if(!options) return;
+
+    options.forEach(opt => {
         const b = document.createElement("button");
-        b.textContent = o;
-        b.onclick = () => send(o);
+        b.textContent = opt;
+
+        b.onclick = () => {
+            input.value = opt;
+            sendMessage();
+        };
+
         box.appendChild(b);
     });
 }
 
-async function send(msgOverride){
+// ----------------------------
+// SEND MESSAGE (FIXED)
+// ----------------------------
+async function sendMessage(){
 
-    let msg = msgOverride || document.getElementById("input").value;
+    const msg = input.value.trim();
 
-    add(msg,"user");
+    if(!msg) return;
 
-    const res = await fetch("/ask", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({message:msg})
-    });
+    addMessage(msg, "user");
 
-    const data = await res.json();
+    input.value = ""; // FIX: clear immediately
 
-    add(data.response,"bot");
+    try {
+        const res = await fetch("/ask", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ message: msg })
+        });
 
-    if(data.step){
-        document.getElementById("stepbox").textContent = "Step " + data.step;
-    }
+        if(!res.ok){
+            throw new Error("Server error: " + res.status);
+        }
 
-    if(data.options){
+        const data = await res.json();
+
+        addMessage(data.response || "No response received", "bot");
+
+        if(data.step){
+            document.getElementById("stepbox").textContent = "Step " + data.step;
+        }
+
         renderButtons(data.options);
+
+    } catch (err) {
+        addMessage("⚠ Error contacting server. Check backend logs.", "bot");
+        console.error(err);
     }
 }
+
+// ----------------------------
+// ENTER KEY SUPPORT (FIXED)
+// ----------------------------
+input.addEventListener("keydown", function(event){
+    if(event.key === "Enter"){
+        event.preventDefault();
+        sendMessage();
+    }
+});
 
 </script>
 
