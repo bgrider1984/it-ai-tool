@@ -1,8 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<title>IT Copilot</title>
+<title>IT Helpdesk Copilot</title>
 
 <style>
 body {
@@ -11,129 +10,120 @@ body {
     background:#0b1220;
     color:white;
     display:flex;
-    height:100vh;
+}
+
+.sidebar {
+    width:250px;
+    background:#111827;
+    padding:10px;
 }
 
 .main {
     flex:1;
-    display:flex;
-    flex-direction:column;
+    padding:20px;
 }
 
-.header {
-    padding:10px;
-    background:#111827;
-    display:flex;
-    justify-content:space-between;
-}
-
-#chat {
-    flex:1;
-    overflow-y:auto;
+.chat {
+    background:#1f2937;
     padding:15px;
-    display:flex;
-    flex-direction:column;
+    border-radius:10px;
+    height:60vh;
+    overflow:auto;
 }
 
 .msg {
-    display:inline-block;
-    max-width:70%;
+    margin:10px 0;
     padding:10px;
-    margin:6px 0;
-    border-radius:10px;
-    white-space:pre-wrap;
+    border-radius:8px;
 }
 
-.user { background:#2563eb; align-self:flex-end; }
-.bot { background:#374151; align-self:flex-start; }
-
-.input-area {
-    display:flex;
-    padding:10px;
-    background:#111827;
-}
-
-input {
-    flex:1;
-    padding:10px;
-    border-radius:6px;
-    border:none;
-}
+.user { background:#2563eb; }
+.bot { background:#374151; }
 
 button {
-    margin-left:10px;
+    margin:5px;
     padding:10px;
-    background:#22c55e;
     border:none;
-    color:white;
     border-radius:6px;
     cursor:pointer;
+    background:#22c55e;
+    color:white;
+}
+
+.stepbox {
+    background:#111827;
+    padding:10px;
+    margin-bottom:10px;
+    border-radius:10px;
 }
 </style>
 </head>
 
 <body>
 
+<div class="sidebar">
+<h3>Sessions</h3>
+<div id="sessions"></div>
+</div>
+
 <div class="main">
 
-<div class="header">
-    <div>IT Copilot</div>
-    <button onclick="logout()">Logout</button>
-</div>
+<h2>IT Copilot SaaS</h2>
 
-<div id="chat"></div>
+<div class="stepbox" id="stepbox">Step: Not started</div>
 
-<div class="input-area">
-    <input id="input" placeholder="Ask your issue...">
-    <button onclick="send()">Send</button>
-</div>
+<div class="chat" id="chat"></div>
+
+<input id="input" placeholder="Describe issue..." style="width:70%;padding:10px;">
+<button onclick="send()">Send</button>
+
+<div id="buttons"></div>
 
 </div>
 
 <script>
 
 function add(text, cls){
-    const div = document.createElement("div");
-    div.className = "msg " + cls;
-    div.textContent = text;
-    document.getElementById("chat").appendChild(div);
+    const d = document.createElement("div");
+    d.className = "msg " + cls;
+    d.textContent = text;
+    document.getElementById("chat").appendChild(d);
 }
 
-document.addEventListener("keydown", function(e){
-    if(e.key === "Enter" && document.activeElement.id === "input"){
-        send();
-    }
-});
-
-async function send(){
-
-    const input = document.getElementById("input");
-    const msg = input.value.trim();
-
-    if(!msg) return;
-
-    input.value = "";
-
-    add(msg, "user");
-
-    try {
-        const res = await fetch("/ask", {
-            method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({message: msg})
-        });
-
-        const data = await res.json();
-
-        add(data.response || "No response received", "bot");
-
-    } catch (err) {
-        add("Network error. Please try again.", "bot");
-    }
+function renderButtons(options){
+    const box = document.getElementById("buttons");
+    box.innerHTML = "";
+    options.forEach(o=>{
+        const b = document.createElement("button");
+        b.textContent = o;
+        b.onclick = () => send(o);
+        box.appendChild(b);
+    });
 }
 
-function logout(){
-    window.location.href = "/logout";
+async function send(msgOverride){
+
+    let msg = msgOverride || document.getElementById("input").value;
+
+    add(msg,"user");
+
+    const res = await fetch("/ask", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({message:msg})
+    });
+
+    const data = await res.json();
+
+    add(data.response,"bot");
+
+    if(data.step){
+        document.getElementById("stepbox").textContent = "Step " + data.step;
+    }
+
+    if(data.options){
+        renderButtons(data.options);
+    }
 }
 
 </script>
