@@ -19,45 +19,61 @@ def get_sid():
         sessions[sid] = {
             "step": 0,
             "flow": None,
-            "last_response": ""
+            "last_response": "",
+            "last_q": None
         }
 
     return session["sid"]
 
 # ----------------------------
-# FLOW DETECTION
+# HELPERS
 # ----------------------------
-def detect_flow(msg):
-    t = msg.lower()
-    if "keyboard" in t:
-        return "keyboard"
-    if "crash" in t:
-        return "crash"
+def is_yes(msg):
+    return any(x in msg for x in ["yes", "y", "yeah", "yep", "fixed", "working", "resolved"])
+
+def is_no(msg):
+    return any(x in msg for x in ["no", "n", "nope", "still"])
+
+def interpret_answer(msg, state):
+    """
+    Returns:
+    - "resolved"
+    - "not_resolved"
+    - None
+    """
+    if state["last_q"] == "fixed":
+        if is_yes(msg):
+            return "resolved"
+        if is_no(msg):
+            return "not_resolved"
+
+    if state["last_q"] == "still":
+        if is_yes(msg):  # YES = still broken
+            return "not_resolved"
+        if is_no(msg):   # NO = no longer happening
+            return "resolved"
+
     return None
 
-# ----------------------------
-# RESPONSE GUARD
-# ----------------------------
 def safe_response(state, text):
     if state["last_response"] == text:
-        return text + "\n\nLet’s move to the next step."
+        return text + "\n\nLet’s continue."
     state["last_response"] = text
     return text
 
 # ----------------------------
-# YES / RESOLVED DETECTION
+# FLOW DETECT
 # ----------------------------
-def is_yes(msg):
-    yes_words = ["yes", "yeah", "yep", "y", "fixed", "working", "resolved", "all good"]
-    return any(word in msg for word in yes_words)
-
-def is_no(msg):
-    return any(word in msg for word in ["no", "still", "not"])
+def detect_flow(msg):
+    if "keyboard" in msg:
+        return "keyboard"
+    return "keyboard"
 
 # ----------------------------
-# KEYBOARD STEPS
+# STEPS
 # ----------------------------
-def step1():
+def step1(state):
+    state["last_q"] = "fixed"
     return (
         "Step 1: Check keyboard power\n\n"
         "• Replace batteries\n"
@@ -65,7 +81,8 @@ def step1():
         "Did that fix the issue?"
     )
 
-def step2():
+def step2(state):
+    state["last_q"] = "still"
     return (
         "Step 2: Check signal interference\n\n"
         "• Move keyboard closer\n"
@@ -73,39 +90,39 @@ def step2():
         "Is the issue still happening?"
     )
 
-def step3():
+def step3(state):
+    state["last_q"] = "fixed"
     return (
         "Step 3: Try a different USB port\n\n"
-        "• Plug receiver into another port (prefer back of PC)\n\n"
+        "• Plug receiver into another port\n\n"
         "Did that fix the issue?"
     )
 
-def step4():
+def step4(state):
+    state["last_q"] = "fixed"
     return (
         "Step 4: Update keyboard driver\n\n"
         "• Right-click Start → Device Manager\n"
         "• Expand 'Keyboards'\n"
-        "• Right-click your keyboard → Update driver\n\n"
-        "Then restart your computer\n\n"
+        "• Update driver\n\n"
+        "Restart PC after\n\n"
         "Did that fix the issue?"
     )
 
-def step5():
+def step5(state):
+    state["last_q"] = None
     return (
         "Step 5: Hardware test\n\n"
-        "Plug the keyboard into another computer\n\n"
-        "• If issue still happens → keyboard is faulty\n"
-        "• If it works fine → issue is your PC\n\n"
-        "Tell me what happened."
+        "• Plug keyboard into another computer\n\n"
+        "Tell me what happens."
     )
 
-def step6():
+def step6(state):
+    state["last_q"] = "fixed"
     return (
-        "Final Step: System-side fix\n\n"
-        "• Open Device Manager\n"
-        "• Uninstall keyboard device\n"
-        "• Restart computer\n\n"
-        "Windows will reinstall it\n\n"
+        "Final Step: Reinstall driver\n\n"
+        "• Device Manager → Uninstall keyboard\n"
+        "• Restart PC\n\n"
         "Did that fix the issue?"
     )
 
@@ -115,25 +132,15 @@ def step6():
 @app.route("/ask", methods=["POST"])
 def ask():
 
-    data = request.json or {}
-    msg = data.get("message", "").lower()
+    msg = (request.json.get("message") or "").lower()
 
     sid = get_sid()
     state = sessions[sid]
 
-    # ----------------------------
-    # GLOBAL RESOLUTION CHECK
-    # ----------------------------
-    if is_yes(msg) and state["step"] != 0:
-        return jsonify({
-            "response": "Perfect — glad that fixed it 👍\n\nIf anything else comes up, just let me know."
-        })
-
-    # ----------------------------
-    # FLOW DETECT
-    # ----------------------------
     if state["flow"] is None:
-        state["flow"] = detect_flow(msg) or "keyboard"
+        state["flow"] = detect_flow(msg)
+
+    answer = interpret_answer(msg, state)
 
     # ============================
     # KEYBOARD FLOW
@@ -142,59 +149,48 @@ def ask():
 
         if state["step"] == 0:
             state["step"] = 1
-            return jsonify({"response": safe_response(state, step1())})
+            return jsonify({"response": safe_response(state, step1(state))})
 
         if state["step"] == 1:
-            if is_yes(msg):
-                return jsonify({"response": "Great — issue resolved."})
+            if answer == "resolved":
+                return jsonify({"response": "Perfect — glad that fixed it 👍"})
             state["step"] = 2
-            return jsonify({"response": safe_response(state, step2())})
+            return jsonify({"response": safe_response(state, step2(state))})
 
         if state["step"] == 2:
-            if is_yes(msg):  # still happening
+            if answer == "not_resolved":
                 state["step"] = 3
-                return jsonify({"response": safe_response(state, step3())})
+                return jsonify({"response": safe_response(state, step3(state))})
             return jsonify({"response": "Good — interference was the issue."})
 
         if state["step"] == 3:
-            if is_yes(msg):
-                return jsonify({"response": "Great — issue resolved."})
+            if answer == "resolved":
+                return jsonify({"response": "Great — issue fixed."})
             state["step"] = 4
-            return jsonify({"response": safe_response(state, step4())})
+            return jsonify({"response": safe_response(state, step4(state))})
 
         if state["step"] == 4:
-            if is_yes(msg):
-                return jsonify({"response": "Driver update fixed the issue."})
+            if answer == "resolved":
+                return jsonify({"response": "Driver update fixed it 👍"})
             state["step"] = 5
-            return jsonify({"response": safe_response(state, step5())})
+            return jsonify({"response": safe_response(state, step5(state))})
 
         if state["step"] == 5:
             if "works fine" in msg:
                 state["step"] = 6
-                return jsonify({"response": safe_response(state, step6())})
+                return jsonify({"response": safe_response(state, step6(state))})
 
             if "still" in msg:
-                return jsonify({
-                    "response": "That confirms the keyboard is failing. Replacement recommended."
-                })
+                return jsonify({"response": "That confirms the keyboard is faulty. Replace it."})
 
-            return jsonify({
-                "response": safe_response(state, "What happened when you tested it?")
-            })
+            return jsonify({"response": "What happened when you tested it on another computer?"})
 
         if state["step"] == 6:
-            if is_yes(msg):
-                return jsonify({"response": "Great — issue resolved."})
-            return jsonify({
-                "response": "At this point, it may be a deeper system issue."
-            })
+            if answer == "resolved":
+                return jsonify({"response": "Perfect — issue resolved 👍"})
+            return jsonify({"response": "This may require deeper system troubleshooting."})
 
-    # ============================
-    # FALLBACK
-    # ============================
-    return jsonify({
-        "response": "Tell me more and I’ll guide you."
-    })
+    return jsonify({"response": "Tell me more."})
 
 # ----------------------------
 # ROUTES
