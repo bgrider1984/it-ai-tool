@@ -18,106 +18,82 @@ def get_sid():
 
         sessions[sid] = {
             "step": 0,
-            "flow": None
+            "flow": None,
+            "last_question": None
         }
 
     return session["sid"]
 
 # ----------------------------
-# DETECT FLOW
+# FLOW DETECTION
 # ----------------------------
 def detect_flow(msg):
     t = msg.lower()
 
     if "keyboard" in t:
         return "keyboard"
+    if "crash" in t:
+        return "crash"
     if "app" in t:
         return "apps"
 
-    return "general"
+    return None
+
+# ----------------------------
+# NEW ISSUE DETECTION
+# ----------------------------
+def is_new_issue(msg, state):
+    detected = detect_flow(msg)
+
+    if detected and detected != state["flow"]:
+        return detected
+
+    return None
 
 # ----------------------------
 # KEYBOARD STEPS
 # ----------------------------
-def keyboard_step_1():
+def step1():
     return (
         "Step 1: Check keyboard power\n\n"
-        "If wireless:\n"
-        "• Replace batteries with NEW ones\n"
-        "• Make sure power switch is ON\n\n"
-        "If using USB receiver:\n"
-        "• Unplug and plug it back in\n\n"
+        "• Replace batteries\n"
+        "• Make sure it is ON\n\n"
         "Did that fix the issue?"
     )
 
-def keyboard_step_2():
+def step2():
     return (
         "Step 2: Check signal interference\n\n"
-        "• Move keyboard closer to PC\n"
-        "• Remove nearby wireless devices temporarily\n\n"
-        "Does the issue still happen?"
+        "• Move keyboard closer\n"
+        "• Remove wireless interference\n\n"
+        "Is the issue still happening?"
     )
 
-def keyboard_step_3():
+def step3():
     return (
-        "Step 3: Check USB receiver\n\n"
-        "• Plug receiver into a different USB port\n"
-        "• Prefer ports on the back of the PC\n\n"
-        "Did that change anything?"
-    )
-
-def keyboard_step_4():
-    return (
-        "Step 4: Check keyboard drivers\n\n"
-
-        "Open Device Manager:\n"
-        "• Right-click Start\n"
-        "• Click 'Device Manager'\n\n"
-
-        "Find your keyboard:\n"
-        "• Expand 'Keyboards'\n"
-        "• Right-click your keyboard → 'Update driver'\n\n"
-
-        "Then:\n"
-        "• Click 'Search automatically for drivers'\n\n"
-
-        "After that:\n"
-        "• Restart your computer\n\n"
-
+        "Step 3: Try a different USB port\n\n"
+        "• Plug receiver into another port\n\n"
         "Did that fix the issue?"
     )
 
-def keyboard_step_5():
+def step4():
     return (
-        "Step 5: Reinstall keyboard driver\n\n"
-
-        "In Device Manager:\n"
-        "• Right-click your keyboard\n"
-        "• Click 'Uninstall device'\n\n"
-
-        "Then:\n"
-        "• Restart your computer\n\n"
-
-        "What happens:\n"
-        "• Windows will reinstall the driver automatically\n\n"
-
+        "Step 4: Update keyboard driver\n\n"
+        "• Right-click Start → Device Manager\n"
+        "• Expand Keyboards\n"
+        "• Right-click → Update driver\n\n"
         "Did that fix the issue?"
     )
 
-def keyboard_step_6():
+# ----------------------------
+# CRASH FLOW
+# ----------------------------
+def crash_start():
     return (
-        "Step 6: Hardware check\n\n"
-
-        "Test this:\n"
-        "• Try the keyboard on another computer\n\n"
-
-        "If it still has the issue:\n"
-        "• The keyboard hardware is likely failing\n\n"
-
-        "If it works fine elsewhere:\n"
-        "• The issue is with your PC configuration\n\n"
-
-        "Tell me what happened."
+        "It looks like a system crash issue.\n\n"
+        "Step 1:\n"
+        "• Restart the computer\n\n"
+        "Let me know if it crashes again."
     )
 
 # ----------------------------
@@ -157,59 +133,75 @@ def ask():
     sid = get_sid()
     state = sessions[sid]
 
-    # detect flow once
+    # ----------------------------
+    # NEW ISSUE HANDLING
+    # ----------------------------
+    new_issue = is_new_issue(msg, state)
+    if new_issue:
+        state["flow"] = new_issue
+        state["step"] = 0
+
+    # ----------------------------
+    # INITIAL FLOW SET
+    # ----------------------------
     if state["flow"] is None:
-        state["flow"] = detect_flow(msg)
+        state["flow"] = detect_flow(msg) or "keyboard"
+
+    flow = state["flow"]
 
     # ============================
     # KEYBOARD FLOW
     # ============================
-    if state["flow"] == "keyboard":
+    if flow == "keyboard":
 
         if state["step"] == 0:
             state["step"] = 1
-            return jsonify({"response": keyboard_step_1()})
+            state["last_question"] = "fixed"
+            return jsonify({"response": step1()})
 
         if state["step"] == 1:
             if "yes" in msg:
                 return jsonify({"response": "Great — issue resolved."})
             state["step"] = 2
-            return jsonify({"response": keyboard_step_2()})
+            state["last_question"] = "still"
+            return jsonify({"response": step2()})
 
         if state["step"] == 2:
-            if "no" in msg or "still" in msg:
+            if "yes" in msg:  # YES = still broken
                 state["step"] = 3
-                return jsonify({"response": keyboard_step_3()})
-            return jsonify({"response": "Good — sounds like interference was the issue."})
+                state["last_question"] = "fixed"
+                return jsonify({"response": step3()})
+            else:
+                return jsonify({"response": "Good — interference was the issue."})
 
         if state["step"] == 3:
-            if "no" in msg or "still" in msg:
-                state["step"] = 4
-                return jsonify({"response": keyboard_step_4()})
-            return jsonify({"response": "Good — USB port was the issue."})
+            if "yes" in msg:
+                return jsonify({"response": "Great — issue resolved."})
+            state["step"] = 4
+            state["last_question"] = "fixed"
+            return jsonify({"response": step4()})
 
         if state["step"] == 4:
             if "yes" in msg:
-                return jsonify({"response": "Great — driver update fixed it."})
-            state["step"] = 5
-            return jsonify({"response": keyboard_step_5()})
+                return jsonify({"response": "Driver update fixed the issue."})
+            return jsonify({"response": "Next step would be hardware testing."})
 
-        if state["step"] == 5:
-            if "yes" in msg:
-                return jsonify({"response": "Good — reinstall fixed the issue."})
-            state["step"] = 6
-            return jsonify({"response": keyboard_step_6()})
+    # ============================
+    # CRASH FLOW
+    # ============================
+    if flow == "crash":
 
-        if state["step"] == 6:
-            return jsonify({
-                "response": "Based on that result, we can determine whether this is hardware or system related."
-            })
+        if state["step"] == 0:
+            state["step"] = 1
+            return jsonify({"response": crash_start()})
+
+        return jsonify({"response": "Tell me what happens after restart."})
 
     # ============================
     # FALLBACK
     # ============================
     return jsonify({
-        "response": "Tell me more about the issue and I’ll guide you."
+        "response": "Tell me more about the issue."
     })
 
 # ----------------------------
