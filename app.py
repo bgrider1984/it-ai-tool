@@ -6,7 +6,7 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
 # ----------------------------
-# SESSION STATE STORE
+# SESSION STORAGE
 # ----------------------------
 sessions = {}
 
@@ -27,33 +27,31 @@ def get_sid():
                 "trigger": None,
                 "error": None
             },
-            "history": []
+            "history": [],
+            "restart_done": False
         }
 
     return session["sid"]
 
 # ----------------------------
-# SLOT ANALYSIS
+# SLOT PARSER
 # ----------------------------
 def update_slots(msg, state):
     t = msg.lower()
 
-    # scope
-    if "all" in t or "everything" in t:
+    if "all" in t:
         state["slots"]["scope"] = "all"
-    elif "one" in t or "single" in t:
+    elif "one" in t:
         state["slots"]["scope"] = "one"
 
-    # trigger
     if "update" in t:
         state["slots"]["trigger"] = "update"
     elif "restart" in t:
         state["slots"]["trigger"] = "restart"
 
-    # error
-    if "error" in t or "crash" in t:
+    if "error" in t:
         state["slots"]["error"] = "yes"
-    elif "no error" in t or "none" in t:
+    elif "none" in t:
         state["slots"]["error"] = "no"
 
     state["history"].append(msg.lower())
@@ -62,44 +60,51 @@ def update_slots(msg, state):
     return state, missing
 
 # ----------------------------
-# ROOT CAUSE ENGINE
+# STOPLIGHT DIAGNOSTICS
 # ----------------------------
-def diagnose(slots):
+def stoplight(slots):
 
+    results = []
+
+    # SYSTEM WIDE + UPDATE
     if slots["scope"] == "all" and slots["trigger"] == "update":
-        return {
-            "cause": "Likely Windows update affected shell or user session",
-            "fixes": [
-                "Restart Windows Explorer",
-                "Check Windows Update history",
-                "Boot into Safe Mode and test"
-            ]
-        }
+        results.append(("🟢", "Windows update caused system shell issue"))
+        results.append(("🟡", "User profile corruption"))
+        results.append(("🔴", "Hardware failure"))
 
-    if slots["scope"] == "all":
-        return {
-            "cause": "System-wide application launch failure",
-            "fixes": [
-                "Check user profile integrity",
-                "Run SFC /scannow",
-                "Check startup policies or antivirus blocking apps"
-            ]
-        }
+    # SYSTEM WIDE ONLY
+    elif slots["scope"] == "all":
+        results.append(("🟢", "Startup/service issue"))
+        results.append(("🟡", "User profile corruption"))
+        results.append(("🔴", "Disk failure"))
 
-    if slots["scope"] == "one":
-        return {
-            "cause": "Single application launch issue",
-            "fixes": [
-                "Reinstall the affected application",
-                "Run as administrator",
-                "Clear app cache / settings"
-            ]
-        }
+    # SINGLE APP
+    elif slots["scope"] == "one":
+        results.append(("🟢", "App corruption or install issue"))
+        results.append(("🟡", "Permissions issue"))
+        results.append(("🔴", "OS-level corruption"))
 
-    return {
-        "cause": "Unknown system state",
-        "fixes": ["Gather more information before proceeding"]
-    }
+    else:
+        results.append(("🟢", "Need more info to classify issue"))
+
+    return results
+
+# ----------------------------
+# ROOT FIX ENGINE (KEEP IT SIMPLE FIRST)
+# ----------------------------
+def simple_fix(state):
+
+    if not state.get("restart_done"):
+        state["restart_done"] = True
+
+        return (
+            "Step 1 (K.I.S.S.):\n"
+            "👉 Restart your computer completely\n"
+            "Then try opening your apps again.\n\n"
+            "Tell me: Did that fix it?"
+        )
+
+    return "Now let's continue troubleshooting based on results."
 
 # ----------------------------
 # ROUTES
@@ -127,7 +132,7 @@ def logout():
     return redirect("/")
 
 # ----------------------------
-# MAIN DIAGNOSTIC ENGINE
+# MAIN ENGINE
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
@@ -135,44 +140,55 @@ def ask():
     data = request.json or {}
     msg = data.get("message", "")
 
-    # ----------------------------
-    # HANDLE INTERRUPT QUESTIONS
-    # ----------------------------
-    if "how do i" in msg.lower():
-        return jsonify({
-            "response": "Press Ctrl + Shift + Esc to open Task Manager.\nThen come back and tell me what you see."
-        })
-
     sid = get_sid()
     state = sessions[sid]
 
     state, missing = update_slots(msg, state)
 
     # ----------------------------
-    # IF MISSING INFO → DO NOT ADVANCE
+    # STEP 1: ALWAYS START SIMPLE
     # ----------------------------
-    if missing:
-
-        question_map = {
-            "scope": "Is this happening to ALL apps or just ONE app?",
-            "trigger": "Did this start after an UPDATE or RESTART?",
-            "error": "Are you seeing ANY error messages?"
-        }
-
+    if state["step"] == 0:
+        state["step"] = 1
         return jsonify({
-            "response": "I need a bit more detail:\n\n" +
-                        "\n".join([question_map[m] for m in missing])
+            "response": simple_fix(state)
         })
 
     # ----------------------------
-    # FULL DIAGNOSIS
+    # STEP 2: IF USER CONFIRMS ISSUE STILL EXISTS
     # ----------------------------
-    result = diagnose(state["slots"])
+    if state["step"] == 1:
+
+        if "yes" in msg.lower() or "still" in msg.lower():
+            state["step"] = 2
+
+            lights = stoplight(state["slots"])
+
+            formatted = "\n".join([f"{c} {t}" for c, t in lights])
+
+            return jsonify({
+                "response":
+                    "Okay, let's go deeper.\n\n"
+                    "Possible causes:\n" + formatted + "\n\n"
+                    "Tell me what changed recently or what you observed."
+            })
+
+        return jsonify({
+            "response": "Great — seems like the restart may have helped. Let me know if it happens again."
+        })
+
+    # ----------------------------
+    # STEP 3: FINAL DIAGNOSIS
+    # ----------------------------
+    lights = stoplight(state["slots"])
+
+    formatted = "\n".join([f"{c} {t}" for c, t in lights])
 
     return jsonify({
         "response":
-            "Root Cause:\n" + result["cause"] + "\n\n" +
-            "Recommended Fixes:\n- " + "\n- ".join(result["fixes"])
+            "Final Diagnostic Overview:\n\n" +
+            formatted +
+            "\n\nNext step: describe what you see when trying to open the apps."
     })
 
 # ----------------------------
