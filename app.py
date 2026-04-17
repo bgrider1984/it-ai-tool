@@ -18,64 +18,20 @@ def get_sid():
 
         sessions[sid] = {
             "step": 0,
-            "slots": {
-                "scope": None,
-                "trigger": None,
-                "error": None
-            },
-            "history": [],
-            "restart_done": False
+            "history": []
         }
 
     return session["sid"]
 
 # ----------------------------
-# SLOT PARSER
-# ----------------------------
-def update_slots(msg, state):
-    t = msg.lower()
-
-    if "all" in t:
-        state["slots"]["scope"] = "all"
-    elif "one" in t:
-        state["slots"]["scope"] = "one"
-
-    if "update" in t:
-        state["slots"]["trigger"] = "update"
-    elif "restart" in t:
-        state["slots"]["trigger"] = "restart"
-
-    if "error" in t or "crash" in t:
-        state["slots"]["error"] = "yes"
-    elif "none" in t or "no error" in t:
-        state["slots"]["error"] = "no"
-
-    state["history"].append(t)
-    return state
-
-# ----------------------------
-# DETECTION ENGINE
-# ----------------------------
-def detect_conditions(msg):
-    t = msg.lower()
-
-    return {
-        "high_memory": "memory" in t and any(x in t for x in ["90", "95", "100"]),
-        "high_cpu": "cpu" in t and any(x in t for x in ["90", "95", "100"]),
-        "desktop_missing": "icons disappeared" in t or "desktop disappeared" in t
-    }
-
-# ----------------------------
-# STEP BUILDERS
+# STEP CONTENT
 # ----------------------------
 def restart_step():
     return (
         "Step 1: Restart your computer\n\n"
-        "What to do:\n"
-        "• Click Start → Power → Restart\n\n"
-        "Important:\n"
-        "• Use Restart, not Shutdown\n\n"
-        "After reboot:\n"
+        "• Click Start → Power → Restart\n"
+        "• Do NOT shut down\n\n"
+        "After restart:\n"
         "• Try opening apps again\n\n"
         "Did that fix the issue?"
     )
@@ -93,32 +49,57 @@ def task_manager_step():
 
 def memory_fix_step():
     return (
-        "High memory usage detected.\n\n"
-        "Step 3: Identify heavy processes\n\n"
+        "Step 3: Identify high memory usage\n\n"
         "In Task Manager:\n"
-        "• Click 'Processes'\n"
-        "• Sort by Memory (click column header)\n\n"
+        "• Go to Processes tab\n"
+        "• Click 'Memory' column to sort\n\n"
         "Look for:\n"
-        "• Anything using a large % of memory\n\n"
+        "• Apps using the most memory\n\n"
         "Then:\n"
-        "• Right-click → End Task (only if safe, avoid system processes)\n\n"
-        "After that:\n"
-        "• Try opening apps again\n\n"
-        "Tell me what process was using the most memory."
+        "• Right-click → End Task (ONLY if safe)\n\n"
+        "Tell me which process is using the most memory."
+    )
+
+def safe_process_explanation():
+    return (
+        "How to know if a process is safe to close:\n\n"
+
+        "Generally SAFE to close:\n"
+        "• Web browsers (Chrome, Edge)\n"
+        "• Apps you opened (Discord, Steam, etc.)\n\n"
+
+        "DO NOT close:\n"
+        "• Anything named 'System'\n"
+        "• 'Windows Explorer'\n"
+        "• 'Service Host'\n"
+        "• 'svchost.exe'\n\n"
+
+        "Tip:\n"
+        "If you're unsure, tell me the process name and I’ll check it for you."
     )
 
 def explorer_fix_step():
     return (
-        "Desktop icons missing usually means Windows Explorer crashed.\n\n"
-        "Step 4: Restart Windows Explorer\n\n"
+        "Step 4: Fix missing desktop icons\n\n"
         "In Task Manager:\n"
-        "• Scroll down to 'Windows Explorer'\n"
-        "• Right-click it\n"
-        "• Click 'Restart'\n\n"
-        "What this does:\n"
-        "• Reloads desktop and taskbar\n\n"
-        "Tell me if your icons come back."
+        "• Find 'Windows Explorer'\n"
+        "• Right-click → Restart\n\n"
+        "This reloads your desktop.\n\n"
+        "Did your icons come back?"
     )
+
+# ----------------------------
+# DETECTION
+# ----------------------------
+def detect(msg):
+    t = msg.lower()
+
+    return {
+        "high_memory": "memory" in t and any(x in t for x in ["90", "95", "100"]),
+        "icons_missing": "icons disappeared" in t or "desktop disappeared" in t,
+        "asking_safe": "safe" in t,
+        "asking_process": "process" in t
+    }
 
 # ----------------------------
 # ROUTES
@@ -157,14 +138,7 @@ def ask():
     sid = get_sid()
     state = sessions[sid]
 
-    update_slots(msg, state)
-    signals = detect_conditions(msg)
-
-    # ----------------------------
-    # HANDLE HOW-TO
-    # ----------------------------
-    if "how do i" in msg.lower():
-        return jsonify({"response": task_manager_step()})
+    signals = detect(msg)
 
     # ----------------------------
     # STEP 0
@@ -174,30 +148,56 @@ def ask():
         return jsonify({"response": restart_step()})
 
     # ----------------------------
-    # STEP 1
+    # STEP 1 (RESTART RESULT)
     # ----------------------------
     if state["step"] == 1:
-        if "no" in msg.lower() or "still" in msg.lower():
+        if "no" in msg.lower():
             state["step"] = 2
             return jsonify({"response": task_manager_step()})
-        return jsonify({"response": "Great — sounds like the issue is resolved."})
+        return jsonify({"response": "Good — issue resolved."})
 
     # ----------------------------
-    # SIGNAL-DRIVEN RESPONSES
+    # STEP 2 (TASK MANAGER)
     # ----------------------------
-    if signals["desktop_missing"]:
-        state["step"] = 4
-        return jsonify({"response": explorer_fix_step()})
+    if state["step"] == 2:
 
-    if signals["high_memory"]:
-        state["step"] = 3
-        return jsonify({"response": memory_fix_step()})
+        if signals["high_memory"]:
+            state["step"] = 3
+            return jsonify({"response": memory_fix_step()})
+
+        return jsonify({"response": "Please provide CPU and Memory usage."})
 
     # ----------------------------
-    # DEFAULT PROGRESSION
+    # STEP 3 (MEMORY FIX)
+    # ----------------------------
+    if state["step"] == 3:
+
+        if signals["asking_safe"]:
+            return jsonify({"response": safe_process_explanation()})
+
+        if signals["icons_missing"]:
+            state["step"] = 4
+            return jsonify({"response": explorer_fix_step()})
+
+        return jsonify({
+            "response": "Tell me the name of the process using the most memory."
+        })
+
+    # ----------------------------
+    # STEP 4 (EXPLORER FIX)
+    # ----------------------------
+    if state["step"] == 4:
+
+        if "yes" in msg.lower():
+            return jsonify({"response": "Good — desktop restored. Try opening apps again."})
+
+        return jsonify({"response": "Let’s continue. Are apps opening now?"})
+
+    # ----------------------------
+    # FINAL SAFETY
     # ----------------------------
     return jsonify({
-        "response": "Tell me what you are seeing now and I will guide the next step."
+        "response": "Continue and I’ll guide the next step."
     })
 
 # ----------------------------
@@ -205,10 +205,7 @@ def ask():
 # ----------------------------
 @app.route("/health")
 def health():
-    return jsonify({
-        "status": "ok",
-        "sessions": len(sessions)
-    })
+    return jsonify({"status": "ok"})
 
 # ----------------------------
 # RUN
