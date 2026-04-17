@@ -18,78 +18,106 @@ def get_sid():
 
         sessions[sid] = {
             "step": 0,
-            "flow": None,
-            "history": [],
-            "answered_cpu": False
+            "flow": None
         }
 
     return session["sid"]
 
 # ----------------------------
-# DETECT ISSUE TYPE
+# DETECT FLOW
 # ----------------------------
 def detect_flow(msg):
     t = msg.lower()
 
     if "keyboard" in t:
         return "keyboard"
-
     if "app" in t:
         return "apps"
 
     return "general"
 
 # ----------------------------
-# KEYBOARD FLOW
+# KEYBOARD STEPS
 # ----------------------------
 def keyboard_step_1():
     return (
         "Step 1: Check keyboard power\n\n"
-        "If this is a wireless keyboard:\n"
-        "• Replace the batteries with new ones\n"
-        "• Make sure the keyboard is turned ON\n\n"
-        "If it uses a USB receiver:\n"
-        "• Unplug it and plug it back in\n\n"
-        "Tell me: Did that fix the issue?"
+        "If wireless:\n"
+        "• Replace batteries with NEW ones\n"
+        "• Make sure power switch is ON\n\n"
+        "If using USB receiver:\n"
+        "• Unplug and plug it back in\n\n"
+        "Did that fix the issue?"
     )
 
 def keyboard_step_2():
     return (
         "Step 2: Check signal interference\n\n"
-        "• Move the keyboard closer to the computer\n"
+        "• Move keyboard closer to PC\n"
         "• Remove nearby wireless devices temporarily\n\n"
-        "Tell me if the issue still happens."
+        "Does the issue still happen?"
     )
 
 def keyboard_step_3():
     return (
-        "Step 3: Check USB receiver / drivers\n\n"
-        "• Try a different USB port\n"
-        "• Restart computer\n\n"
-        "If issue continues, we may check drivers next."
+        "Step 3: Check USB receiver\n\n"
+        "• Plug receiver into a different USB port\n"
+        "• Prefer ports on the back of the PC\n\n"
+        "Did that change anything?"
     )
 
-# ----------------------------
-# APP FLOW
-# ----------------------------
-def restart_step():
+def keyboard_step_4():
     return (
-        "Step 1: Restart your computer\n\n"
-        "• Click Start → Power → Restart\n\n"
-        "After restart:\n"
-        "• Try opening apps again\n\n"
+        "Step 4: Check keyboard drivers\n\n"
+
+        "Open Device Manager:\n"
+        "• Right-click Start\n"
+        "• Click 'Device Manager'\n\n"
+
+        "Find your keyboard:\n"
+        "• Expand 'Keyboards'\n"
+        "• Right-click your keyboard → 'Update driver'\n\n"
+
+        "Then:\n"
+        "• Click 'Search automatically for drivers'\n\n"
+
+        "After that:\n"
+        "• Restart your computer\n\n"
+
         "Did that fix the issue?"
     )
 
-def task_manager_step():
+def keyboard_step_5():
     return (
-        "Step 2: Check system usage\n\n"
-        "Open Task Manager:\n"
-        "• Press Ctrl + Shift + Esc\n\n"
-        "Look at:\n"
-        "• CPU %\n"
-        "• Memory %\n\n"
-        "What numbers do you see?"
+        "Step 5: Reinstall keyboard driver\n\n"
+
+        "In Device Manager:\n"
+        "• Right-click your keyboard\n"
+        "• Click 'Uninstall device'\n\n"
+
+        "Then:\n"
+        "• Restart your computer\n\n"
+
+        "What happens:\n"
+        "• Windows will reinstall the driver automatically\n\n"
+
+        "Did that fix the issue?"
+    )
+
+def keyboard_step_6():
+    return (
+        "Step 6: Hardware check\n\n"
+
+        "Test this:\n"
+        "• Try the keyboard on another computer\n\n"
+
+        "If it still has the issue:\n"
+        "• The keyboard hardware is likely failing\n\n"
+
+        "If it works fine elsewhere:\n"
+        "• The issue is with your PC configuration\n\n"
+
+        "Tell me what happened."
     )
 
 # ----------------------------
@@ -124,70 +152,58 @@ def logout():
 def ask():
 
     data = request.json or {}
-    msg = data.get("message", "")
+    msg = data.get("message", "").lower()
 
     sid = get_sid()
     state = sessions[sid]
 
-    state["history"].append(msg.lower())
-
-    # ----------------------------
-    # DETECT FLOW ON FIRST MESSAGE
-    # ----------------------------
+    # detect flow once
     if state["flow"] is None:
         state["flow"] = detect_flow(msg)
-
-    flow = state["flow"]
 
     # ============================
     # KEYBOARD FLOW
     # ============================
-    if flow == "keyboard":
+    if state["flow"] == "keyboard":
 
         if state["step"] == 0:
             state["step"] = 1
             return jsonify({"response": keyboard_step_1()})
 
         if state["step"] == 1:
-            if "yes" in msg.lower():
+            if "yes" in msg:
                 return jsonify({"response": "Great — issue resolved."})
-
             state["step"] = 2
             return jsonify({"response": keyboard_step_2()})
 
         if state["step"] == 2:
-            state["step"] = 3
-            return jsonify({"response": keyboard_step_3()})
+            if "no" in msg or "still" in msg:
+                state["step"] = 3
+                return jsonify({"response": keyboard_step_3()})
+            return jsonify({"response": "Good — sounds like interference was the issue."})
 
-        return jsonify({"response": "If the issue continues, we may need to check drivers or hardware."})
+        if state["step"] == 3:
+            if "no" in msg or "still" in msg:
+                state["step"] = 4
+                return jsonify({"response": keyboard_step_4()})
+            return jsonify({"response": "Good — USB port was the issue."})
 
-    # ============================
-    # APP FLOW
-    # ============================
-    if flow == "apps":
+        if state["step"] == 4:
+            if "yes" in msg:
+                return jsonify({"response": "Great — driver update fixed it."})
+            state["step"] = 5
+            return jsonify({"response": keyboard_step_5()})
 
-        # STEP 0
-        if state["step"] == 0:
-            state["step"] = 1
-            return jsonify({"response": restart_step()})
+        if state["step"] == 5:
+            if "yes" in msg:
+                return jsonify({"response": "Good — reinstall fixed the issue."})
+            state["step"] = 6
+            return jsonify({"response": keyboard_step_6()})
 
-        # STEP 1
-        if state["step"] == 1:
-            if "no" in msg.lower():
-                state["step"] = 2
-                return jsonify({"response": task_manager_step()})
-
-            return jsonify({"response": "Great — issue resolved."})
-
-        # STEP 2
-        if state["step"] == 2:
-
-            if "%" in msg:
-                state["answered_cpu"] = True
-                return jsonify({"response": "Thanks — system usage looks normal. Let’s check startup or app issues next."})
-
-            if not state["answered_cpu"]:
-                return jsonify({"response": "Just to confirm — what % do you see for CPU and memory?"})
+        if state["step"] == 6:
+            return jsonify({
+                "response": "Based on that result, we can determine whether this is hardware or system related."
+            })
 
     # ============================
     # FALLBACK
