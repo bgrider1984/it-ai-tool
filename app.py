@@ -36,13 +36,23 @@ def detect_flow(msg):
     return None
 
 # ----------------------------
-# RESPONSE GUARD (ANTI-LOOP)
+# RESPONSE GUARD
 # ----------------------------
 def safe_response(state, text):
     if state["last_response"] == text:
-        return text + "\n\nLet’s try the next step."
+        return text + "\n\nLet’s move to the next step."
     state["last_response"] = text
     return text
+
+# ----------------------------
+# YES / RESOLVED DETECTION
+# ----------------------------
+def is_yes(msg):
+    yes_words = ["yes", "yeah", "yep", "y", "fixed", "working", "resolved", "all good"]
+    return any(word in msg for word in yes_words)
+
+def is_no(msg):
+    return any(word in msg for word in ["no", "still", "not"])
 
 # ----------------------------
 # KEYBOARD STEPS
@@ -83,23 +93,19 @@ def step4():
 def step5():
     return (
         "Step 5: Hardware test\n\n"
-        "We need to confirm if the keyboard itself is the problem.\n\n"
-        "Do this:\n"
-        "• Plug the keyboard into another computer\n\n"
-        "Results:\n"
-        "• If it STILL has issues → keyboard is faulty\n"
-        "• If it works fine → problem is your PC\n\n"
-        "Tell me what happens."
+        "Plug the keyboard into another computer\n\n"
+        "• If issue still happens → keyboard is faulty\n"
+        "• If it works fine → issue is your PC\n\n"
+        "Tell me what happened."
     )
 
 def step6():
     return (
         "Final Step: System-side fix\n\n"
-        "Since hardware seems OK, try this:\n\n"
         "• Open Device Manager\n"
-        "• Uninstall the keyboard device\n"
-        "• Restart your computer\n\n"
-        "Windows will reinstall it automatically.\n\n"
+        "• Uninstall keyboard device\n"
+        "• Restart computer\n\n"
+        "Windows will reinstall it\n\n"
         "Did that fix the issue?"
     )
 
@@ -115,7 +121,17 @@ def ask():
     sid = get_sid()
     state = sessions[sid]
 
-    # detect flow
+    # ----------------------------
+    # GLOBAL RESOLUTION CHECK
+    # ----------------------------
+    if is_yes(msg) and state["step"] != 0:
+        return jsonify({
+            "response": "Perfect — glad that fixed it 👍\n\nIf anything else comes up, just let me know."
+        })
+
+    # ----------------------------
+    # FLOW DETECT
+    # ----------------------------
     if state["flow"] is None:
         state["flow"] = detect_flow(msg) or "keyboard"
 
@@ -124,67 +140,53 @@ def ask():
     # ============================
     if state["flow"] == "keyboard":
 
-        # handle "what do I do"
-        if "what do i do" in msg:
-            if state["step"] == 5:
-                return jsonify({"response": safe_response(state, step5())})
-            if state["step"] == 6:
-                return jsonify({"response": safe_response(state, step6())})
-
-        # STEP 0
         if state["step"] == 0:
             state["step"] = 1
             return jsonify({"response": safe_response(state, step1())})
 
-        # STEP 1
         if state["step"] == 1:
-            if "yes" in msg:
+            if is_yes(msg):
                 return jsonify({"response": "Great — issue resolved."})
             state["step"] = 2
             return jsonify({"response": safe_response(state, step2())})
 
-        # STEP 2
         if state["step"] == 2:
-            if "yes" in msg:
+            if is_yes(msg):  # still happening
                 state["step"] = 3
                 return jsonify({"response": safe_response(state, step3())})
             return jsonify({"response": "Good — interference was the issue."})
 
-        # STEP 3
         if state["step"] == 3:
-            if "yes" in msg:
+            if is_yes(msg):
                 return jsonify({"response": "Great — issue resolved."})
             state["step"] = 4
             return jsonify({"response": safe_response(state, step4())})
 
-        # STEP 4
         if state["step"] == 4:
-            if "yes" in msg:
+            if is_yes(msg):
                 return jsonify({"response": "Driver update fixed the issue."})
             state["step"] = 5
             return jsonify({"response": safe_response(state, step5())})
 
-        # STEP 5
         if state["step"] == 5:
             if "works fine" in msg:
                 state["step"] = 6
                 return jsonify({"response": safe_response(state, step6())})
 
-            if "still" in msg or "same" in msg:
+            if "still" in msg:
                 return jsonify({
-                    "response": "That confirms the keyboard hardware is failing. Replacing it is recommended."
+                    "response": "That confirms the keyboard is failing. Replacement recommended."
                 })
 
             return jsonify({
-                "response": safe_response(state, "What happened when you tested it on another computer?")
+                "response": safe_response(state, "What happened when you tested it?")
             })
 
-        # STEP 6
         if state["step"] == 6:
-            if "yes" in msg:
-                return jsonify({"response": "Good — issue resolved."})
+            if is_yes(msg):
+                return jsonify({"response": "Great — issue resolved."})
             return jsonify({
-                "response": "At this point, it may be a deeper OS or hardware issue."
+                "response": "At this point, it may be a deeper system issue."
             })
 
     # ============================
