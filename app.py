@@ -18,19 +18,64 @@ def get_sid():
 
         sessions[sid] = {
             "step": 0,
-            "history": []
+            "flow": None,
+            "history": [],
+            "answered_cpu": False
         }
 
     return session["sid"]
 
 # ----------------------------
-# STEP CONTENT
+# DETECT ISSUE TYPE
+# ----------------------------
+def detect_flow(msg):
+    t = msg.lower()
+
+    if "keyboard" in t:
+        return "keyboard"
+
+    if "app" in t:
+        return "apps"
+
+    return "general"
+
+# ----------------------------
+# KEYBOARD FLOW
+# ----------------------------
+def keyboard_step_1():
+    return (
+        "Step 1: Check keyboard power\n\n"
+        "If this is a wireless keyboard:\n"
+        "• Replace the batteries with new ones\n"
+        "• Make sure the keyboard is turned ON\n\n"
+        "If it uses a USB receiver:\n"
+        "• Unplug it and plug it back in\n\n"
+        "Tell me: Did that fix the issue?"
+    )
+
+def keyboard_step_2():
+    return (
+        "Step 2: Check signal interference\n\n"
+        "• Move the keyboard closer to the computer\n"
+        "• Remove nearby wireless devices temporarily\n\n"
+        "Tell me if the issue still happens."
+    )
+
+def keyboard_step_3():
+    return (
+        "Step 3: Check USB receiver / drivers\n\n"
+        "• Try a different USB port\n"
+        "• Restart computer\n\n"
+        "If issue continues, we may check drivers next."
+    )
+
+# ----------------------------
+# APP FLOW
 # ----------------------------
 def restart_step():
     return (
         "Step 1: Restart your computer\n\n"
-        "• Click Start → Power → Restart\n"
-        "• Do NOT shut down\n\n"
+        "• Click Start → Power → Restart\n\n"
         "After restart:\n"
         "• Try opening apps again\n\n"
         "Did that fix the issue?"
@@ -41,65 +86,11 @@ def task_manager_step():
         "Step 2: Check system usage\n\n"
         "Open Task Manager:\n"
         "• Press Ctrl + Shift + Esc\n\n"
-        "Check:\n"
-        "• CPU usage\n"
-        "• Memory usage\n\n"
-        "Reply with what you see."
+        "Look at:\n"
+        "• CPU %\n"
+        "• Memory %\n\n"
+        "What numbers do you see?"
     )
-
-def memory_fix_step():
-    return (
-        "Step 3: Identify high memory usage\n\n"
-        "In Task Manager:\n"
-        "• Go to Processes tab\n"
-        "• Click 'Memory' column to sort\n\n"
-        "Look for:\n"
-        "• Apps using the most memory\n\n"
-        "Then:\n"
-        "• Right-click → End Task (ONLY if safe)\n\n"
-        "Tell me which process is using the most memory."
-    )
-
-def safe_process_explanation():
-    return (
-        "How to know if a process is safe to close:\n\n"
-
-        "Generally SAFE to close:\n"
-        "• Web browsers (Chrome, Edge)\n"
-        "• Apps you opened (Discord, Steam, etc.)\n\n"
-
-        "DO NOT close:\n"
-        "• Anything named 'System'\n"
-        "• 'Windows Explorer'\n"
-        "• 'Service Host'\n"
-        "• 'svchost.exe'\n\n"
-
-        "Tip:\n"
-        "If you're unsure, tell me the process name and I’ll check it for you."
-    )
-
-def explorer_fix_step():
-    return (
-        "Step 4: Fix missing desktop icons\n\n"
-        "In Task Manager:\n"
-        "• Find 'Windows Explorer'\n"
-        "• Right-click → Restart\n\n"
-        "This reloads your desktop.\n\n"
-        "Did your icons come back?"
-    )
-
-# ----------------------------
-# DETECTION
-# ----------------------------
-def detect(msg):
-    t = msg.lower()
-
-    return {
-        "high_memory": "memory" in t and any(x in t for x in ["90", "95", "100"]),
-        "icons_missing": "icons disappeared" in t or "desktop disappeared" in t,
-        "asking_safe": "safe" in t,
-        "asking_process": "process" in t
-    }
 
 # ----------------------------
 # ROUTES
@@ -138,66 +129,71 @@ def ask():
     sid = get_sid()
     state = sessions[sid]
 
-    signals = detect(msg)
+    state["history"].append(msg.lower())
 
     # ----------------------------
-    # STEP 0
+    # DETECT FLOW ON FIRST MESSAGE
     # ----------------------------
-    if state["step"] == 0:
-        state["step"] = 1
-        return jsonify({"response": restart_step()})
+    if state["flow"] is None:
+        state["flow"] = detect_flow(msg)
 
-    # ----------------------------
-    # STEP 1 (RESTART RESULT)
-    # ----------------------------
-    if state["step"] == 1:
-        if "no" in msg.lower():
+    flow = state["flow"]
+
+    # ============================
+    # KEYBOARD FLOW
+    # ============================
+    if flow == "keyboard":
+
+        if state["step"] == 0:
+            state["step"] = 1
+            return jsonify({"response": keyboard_step_1()})
+
+        if state["step"] == 1:
+            if "yes" in msg.lower():
+                return jsonify({"response": "Great — issue resolved."})
+
             state["step"] = 2
-            return jsonify({"response": task_manager_step()})
-        return jsonify({"response": "Good — issue resolved."})
+            return jsonify({"response": keyboard_step_2()})
 
-    # ----------------------------
-    # STEP 2 (TASK MANAGER)
-    # ----------------------------
-    if state["step"] == 2:
-
-        if signals["high_memory"]:
+        if state["step"] == 2:
             state["step"] = 3
-            return jsonify({"response": memory_fix_step()})
+            return jsonify({"response": keyboard_step_3()})
 
-        return jsonify({"response": "Please provide CPU and Memory usage."})
+        return jsonify({"response": "If the issue continues, we may need to check drivers or hardware."})
 
-    # ----------------------------
-    # STEP 3 (MEMORY FIX)
-    # ----------------------------
-    if state["step"] == 3:
+    # ============================
+    # APP FLOW
+    # ============================
+    if flow == "apps":
 
-        if signals["asking_safe"]:
-            return jsonify({"response": safe_process_explanation()})
+        # STEP 0
+        if state["step"] == 0:
+            state["step"] = 1
+            return jsonify({"response": restart_step()})
 
-        if signals["icons_missing"]:
-            state["step"] = 4
-            return jsonify({"response": explorer_fix_step()})
+        # STEP 1
+        if state["step"] == 1:
+            if "no" in msg.lower():
+                state["step"] = 2
+                return jsonify({"response": task_manager_step()})
 
-        return jsonify({
-            "response": "Tell me the name of the process using the most memory."
-        })
+            return jsonify({"response": "Great — issue resolved."})
 
-    # ----------------------------
-    # STEP 4 (EXPLORER FIX)
-    # ----------------------------
-    if state["step"] == 4:
+        # STEP 2
+        if state["step"] == 2:
 
-        if "yes" in msg.lower():
-            return jsonify({"response": "Good — desktop restored. Try opening apps again."})
+            if "%" in msg:
+                state["answered_cpu"] = True
+                return jsonify({"response": "Thanks — system usage looks normal. Let’s check startup or app issues next."})
 
-        return jsonify({"response": "Let’s continue. Are apps opening now?"})
+            if not state["answered_cpu"]:
+                return jsonify({"response": "Just to confirm — what % do you see for CPU and memory?"})
 
-    # ----------------------------
-    # FINAL SAFETY
-    # ----------------------------
+    # ============================
+    # FALLBACK
+    # ============================
     return jsonify({
-        "response": "Continue and I’ll guide the next step."
+        "response": "Tell me more about the issue and I’ll guide you."
     })
 
 # ----------------------------
