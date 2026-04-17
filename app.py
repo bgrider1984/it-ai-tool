@@ -5,11 +5,7 @@ from flask import Flask, request, jsonify, session, redirect, render_template
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
-# ----------------------------
-# SESSION STORAGE
-# ----------------------------
 sessions = {}
-
 USERS = {"admin@local": "admin"}
 
 # ----------------------------
@@ -54,79 +50,74 @@ def update_slots(msg, state):
     elif "none" in t or "no error" in t:
         state["slots"]["error"] = "no"
 
-    state["history"].append(msg.lower())
-
-    missing = [k for k, v in state["slots"].items() if v is None]
-    return state, missing
+    state["history"].append(t)
+    return state
 
 # ----------------------------
-# STOPLIGHT DIAGNOSTICS
+# DETECTION ENGINE
 # ----------------------------
-def stoplight(slots):
+def detect_conditions(msg):
+    t = msg.lower()
 
-    results = []
-
-    if slots["scope"] == "all" and slots["trigger"] == "update":
-        results.append(("🟢", "Windows update may have affected system processes"))
-        results.append(("🟡", "User profile or permissions issue"))
-        results.append(("🔴", "Hardware failure"))
-
-    elif slots["scope"] == "all":
-        results.append(("🟢", "Startup or system service issue"))
-        results.append(("🟡", "Profile corruption"))
-        results.append(("🔴", "Disk failure"))
-
-    elif slots["scope"] == "one":
-        results.append(("🟢", "Application corruption"))
-        results.append(("🟡", "Permissions issue"))
-        results.append(("🔴", "Operating system issue"))
-
-    else:
-        results.append(("🟢", "More information needed"))
-
-    return results
+    return {
+        "high_memory": "memory" in t and any(x in t for x in ["90", "95", "100"]),
+        "high_cpu": "cpu" in t and any(x in t for x in ["90", "95", "100"]),
+        "desktop_missing": "icons disappeared" in t or "desktop disappeared" in t
+    }
 
 # ----------------------------
-# DETAILED STEP ENGINE
+# STEP BUILDERS
 # ----------------------------
 def restart_step():
     return (
         "Step 1: Restart your computer\n\n"
-
         "What to do:\n"
-        "• Click the Start Menu\n"
-        "• Select the Power icon\n"
-        "• Click 'Restart'\n\n"
-
+        "• Click Start → Power → Restart\n\n"
         "Important:\n"
-        "• Do NOT shut down — use Restart specifically\n\n"
-
-        "What this does:\n"
-        "• Clears temporary memory issues\n"
-        "• Restarts all system services\n"
-        "• Fixes many app launch problems\n\n"
-
-        "After it turns back on:\n"
-        "• Try opening the apps again\n\n"
-
-        "Tell me: Did the apps open successfully after the restart?"
+        "• Use Restart, not Shutdown\n\n"
+        "After reboot:\n"
+        "• Try opening apps again\n\n"
+        "Did that fix the issue?"
     )
 
 def task_manager_step():
     return (
-        "Next Step: Check system usage in Task Manager\n\n"
-
-        "How to open it:\n"
+        "Step 2: Check system usage\n\n"
+        "Open Task Manager:\n"
         "• Press Ctrl + Shift + Esc\n\n"
+        "Check:\n"
+        "• CPU usage\n"
+        "• Memory usage\n\n"
+        "Reply with what you see."
+    )
 
-        "What to look for:\n"
-        "• CPU usage — is it near 100%?\n"
-        "• Memory usage — is it near full?\n\n"
+def memory_fix_step():
+    return (
+        "High memory usage detected.\n\n"
+        "Step 3: Identify heavy processes\n\n"
+        "In Task Manager:\n"
+        "• Click 'Processes'\n"
+        "• Sort by Memory (click column header)\n\n"
+        "Look for:\n"
+        "• Anything using a large % of memory\n\n"
+        "Then:\n"
+        "• Right-click → End Task (only if safe, avoid system processes)\n\n"
+        "After that:\n"
+        "• Try opening apps again\n\n"
+        "Tell me what process was using the most memory."
+    )
 
-        "What it means:\n"
-        "• High CPU or memory can prevent apps from opening\n\n"
-
-        "Tell me what you see (CPU % and Memory %)."
+def explorer_fix_step():
+    return (
+        "Desktop icons missing usually means Windows Explorer crashed.\n\n"
+        "Step 4: Restart Windows Explorer\n\n"
+        "In Task Manager:\n"
+        "• Scroll down to 'Windows Explorer'\n"
+        "• Right-click it\n"
+        "• Click 'Restart'\n\n"
+        "What this does:\n"
+        "• Reloads desktop and taskbar\n\n"
+        "Tell me if your icons come back."
     )
 
 # ----------------------------
@@ -166,60 +157,47 @@ def ask():
     sid = get_sid()
     state = sessions[sid]
 
-    state, missing = update_slots(msg, state)
+    update_slots(msg, state)
+    signals = detect_conditions(msg)
 
     # ----------------------------
-    # HANDLE "HOW DO I" QUESTIONS
+    # HANDLE HOW-TO
     # ----------------------------
-    if "task manager" in msg.lower():
+    if "how do i" in msg.lower():
         return jsonify({"response": task_manager_step()})
 
     # ----------------------------
-    # STEP 0: ALWAYS START WITH RESTART
+    # STEP 0
     # ----------------------------
     if state["step"] == 0:
         state["step"] = 1
         return jsonify({"response": restart_step()})
 
     # ----------------------------
-    # STEP 1: AFTER RESTART RESULT
+    # STEP 1
     # ----------------------------
     if state["step"] == 1:
-
-        if "yes" in msg.lower() or "fixed" in msg.lower():
-            return jsonify({
-                "response": "Great — that confirms it was a temporary system issue. Let me know if it happens again."
-            })
-
         if "no" in msg.lower() or "still" in msg.lower():
             state["step"] = 2
-
-            lights = stoplight(state["slots"])
-            formatted = "\n".join([f"{c} {t}" for c, t in lights])
-
-            return jsonify({
-                "response":
-                    "Since the restart did not fix it, here are the most likely causes:\n\n"
-                    + formatted +
-                    "\n\nNext, we’ll check system resource usage."
-            })
-
-        return jsonify({
-            "response": "After restarting, did the apps open or is the issue still happening?"
-        })
+            return jsonify({"response": task_manager_step()})
+        return jsonify({"response": "Great — sounds like the issue is resolved."})
 
     # ----------------------------
-    # STEP 2: NEXT ACTION
+    # SIGNAL-DRIVEN RESPONSES
     # ----------------------------
-    if state["step"] == 2:
+    if signals["desktop_missing"]:
+        state["step"] = 4
+        return jsonify({"response": explorer_fix_step()})
+
+    if signals["high_memory"]:
         state["step"] = 3
-        return jsonify({"response": task_manager_step()})
+        return jsonify({"response": memory_fix_step()})
 
     # ----------------------------
-    # FINAL FALLBACK
+    # DEFAULT PROGRESSION
     # ----------------------------
     return jsonify({
-        "response": "Continue describing what you're seeing and I’ll guide you step-by-step."
+        "response": "Tell me what you are seeing now and I will guide the next step."
     })
 
 # ----------------------------
