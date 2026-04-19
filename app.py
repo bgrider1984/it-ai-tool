@@ -1,17 +1,14 @@
 import os
 import uuid
 from flask import Flask, request, jsonify, session, render_template
-from openai import OpenAI
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 # ----------------------------
-# SESSION MEMORY
+# PERSISTENT MEMORY (V9)
 # ----------------------------
-users = {}
+db = {}
 
 def get_user():
     if "uid" not in session:
@@ -19,129 +16,184 @@ def get_user():
 
     uid = session["uid"]
 
-    if uid not in users:
-        users[uid] = {
-            "history": []
+    if uid not in db:
+        db[uid] = {
+            "sessions": {},
+            "current": None
         }
 
-    return users[uid]
+    return db[uid]
+
+def new_session(user):
+    sid = str(uuid.uuid4())
+
+    user["sessions"][sid] = {
+        "id": sid,
+        "title": "New Issue",
+        "messages": [],
+        "state": {
+            "route": None,
+            "step": 0
+        }
+    }
+
+    user["current"] = sid
+    return user["sessions"][sid]
+
+def get_session(user):
+    sid = user["current"]
+
+    if not sid or sid not in user["sessions"]:
+        return new_session(user)
+
+    return user["sessions"][sid]
 
 # ----------------------------
-# SMART SYSTEM PROMPT (V8 BRAIN)
+# INTELLIGENCE ROUTER (V9 CORE)
 # ----------------------------
-SYSTEM_PROMPT = """
-You are Smart Helpdesk Copilot v8.
+def classify_issue(msg):
 
-You are an IT Tier-1 + Tier-2 troubleshooting assistant.
+    msg = msg.lower()
 
-You MUST:
+    if any(k in msg for k in ["wifi","internet","dns","network","router"]):
+        return "network"
 
-1. Identify issue type:
-   - hardware
-   - software
-   - network
-   - unknown
+    if any(k in msg for k in ["blue screen","crash","app","software","won't open","error"]):
+        return "software"
 
-2. Provide:
-   - Likely cause (top 1–3)
-   - Step-by-step fix (simple → advanced)
-   - ONE question at a time
+    if any(k in msg for k in ["keyboard","mouse","usb","battery","hardware"]):
+        return "hardware"
 
-3. Always include:
-   - Next best action
-   - Simple instructions first (KISS principle)
-   - No repetition of same question twice
+    return "unknown"
 
-4. Output format:
+def route_step(route, step, msg):
 
----
-🧠 Diagnosis:
-- Category:
-- Likely cause:
+    # ---------------- NETWORK ROUTE
+    if route == "network":
 
-🟢 Quick Fix:
-- (1–3 immediate actions user can try)
+        if step == 0:
+            return {
+                "text": "🌐 Network Issue Detected\n\nStep 1: Restart your router\n\nDid that fix it?",
+                "step": 1
+            }
 
-🔧 Step:
-- Clear instruction
+        if step == 1:
+            if "yes" in msg:
+                return {"text": "Great — network restored 👍", "done": True}
 
-❓ Question:
-- One direct follow-up question
+            return {
+                "text": "Step 2: Check if other devices have internet\n\nDo they?",
+                "step": 2
+            }
 
----
+        if step == 2:
+            return {"text": "Try changing DNS to 8.8.8.8", "done": True}
 
-5. NEVER end without a question or next step.
-"""
+    # ---------------- SOFTWARE ROUTE
+    if route == "software":
+
+        if step == 0:
+            return {
+                "text": "🔵 Software Issue Detected\n\nStep 1: Restart the application\n\nDid that fix it?",
+                "step": 1
+            }
+
+        if step == 1:
+            if "no" in msg:
+                return {
+                    "text": "Step 2: Reinstall the application\n\nDid that help?",
+                    "step": 2
+                }
+
+            return {"text": "Fixed 👍", "done": True}
+
+    # ---------------- HARDWARE ROUTE
+    if route == "hardware":
+
+        if step == 0:
+            return {
+                "text": "🟢 Hardware Issue Detected\n\nStep 1: Check power / batteries\n\nDid that fix it?",
+                "step": 1
+            }
+
+        if step == 1:
+            return {"text": "Try a different port or device test.", "done": True}
+
+    # ---------------- UNKNOWN ROUTE
+    return {
+        "text": "I need more info — what exactly is happening?",
+        "done": True
+    }
 
 # ----------------------------
-# AI ENGINE
+# MAIN AI ENTRY
 # ----------------------------
-def generate_response(history, msg):
-
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-    for m in history[-12:]:
-        messages.append(m)
-
-    messages.append({"role": "user", "content": msg})
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        temperature=0.4
-    )
-
-    return response.choices[0].message.content
-
-# ----------------------------
-# ROUTES
-# ----------------------------
-@app.route("/")
-def home():
-    return render_template("dashboard.html")
-
 @app.route("/ask", methods=["POST"])
 def ask():
     try:
-        msg = request.json.get("message", "").strip()
+
+        msg = request.json.get("message", "").strip().lower()
 
         user = get_user()
+        session_data = get_session(user)
 
-        user["history"].append({"role": "user", "content": msg})
+        # store message
+        session_data["messages"].append({"role":"user","text":msg})
 
-        reply = generate_response(user["history"], msg)
+        # classify
+        route = session_data["state"]["route"]
+        step = session_data["state"]["step"]
 
-        user["history"].append({"role": "assistant", "content": reply})
+        if not route:
+            route = classify_issue(msg)
+            session_data["state"]["route"] = route
+
+        result = route_step(route, step, msg)
+
+        # update state
+        if "step" in result:
+            session_data["state"]["step"] = result["step"]
+
+        # store response
+        session_data["messages"].append({"role":"bot","text":result["text"]})
 
         return jsonify({
-            "response": reply,
-            "quick_actions": [
-                "Restart device",
-                "Check cables",
-                "Restart router",
-                "Check Task Manager",
-                "Update drivers"
-            ]
+            "response": result["text"],
+            "route": route,
+            "sessions": list(user["sessions"].values())
         })
 
     except Exception as e:
         print("ERROR:", e)
-        return jsonify({
-            "response": "⚠ System error occurred. Please try again."
-        }), 500
+        return jsonify({"response":"⚠ Server error"}), 500
 
-@app.route("/reset", methods=["POST"])
-def reset():
+# ----------------------------
+@app.route("/sessions")
+def sessions():
     user = get_user()
-    user["history"] = []
-    return jsonify({"status": "reset"})
+    return jsonify(list(user["sessions"].values()))
+
+@app.route("/switch", methods=["POST"])
+def switch():
+    user = get_user()
+    sid = request.json.get("sid")
+    if sid in user["sessions"]:
+        user["current"] = sid
+    return jsonify({"ok": True})
+
+@app.route("/new", methods=["POST"])
+def new():
+    user = get_user()
+    s = new_session(user)
+    return jsonify(s)
+
+@app.route("/")
+def home():
+    return render_template("dashboard.html")
 
 @app.route("/health")
 def health():
-    return jsonify({
-        "status": "ok",
-        "model": "v8-smart-helpdesk"
-    })
+    return jsonify({"status":"ok","v":"v9-routing"})
 
 # ----------------------------
 if __name__ == "__main__":
