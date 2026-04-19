@@ -11,42 +11,50 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 MODEL = "gpt-4.1-mini"
 
 # ----------------------------
-# MEMORY STORAGE
+# MEMORY
 # ----------------------------
 CHAT_MEMORY = {}
-CASE_MEMORY = {}  # NEW: structured facts per session
+CASE_MEMORY = {}
 
 MAX_HISTORY = 12
 
+
 # ----------------------------
-# SYSTEM PROMPT (UPDATED)
+# SYSTEM PROMPTS
 # ----------------------------
-SYSTEM_PROMPT = """
+DIAG_PROMPT = """
 You are an IT troubleshooting assistant.
 
-CRITICAL RULES:
-- NEVER ask the same question twice if the user already answered it.
-- Before asking a question, check if the information is already known.
-- Maintain an internal "case profile" of known facts:
-  - connection type (USB/WiFi)
-  - OS version
-  - error state
-  - device status
+Rules:
+- Ask ONE question at a time
+- Never repeat a question
+- Stop asking once enough info is known
+"""
 
-Behavior:
-- If a fact is already known, do NOT re-ask it.
-- Instead, proceed to next unknown diagnostic step.
-- Be step-by-step, but NOT repetitive.
-- Prefer direct fixes when enough info is known.
+FIX_PROMPT = """
+You are an IT repair specialist in FIX MODE.
 
-If enough information exists:
-- STOP questioning
-- MOVE to solutions immediately
+CRITICAL:
+- DO NOT ask questions
+- DO NOT gather more info
+- ONLY provide solutions
+
+Provide:
+- Short explanation
+- Multiple actionable fixes
+
+Every fix MUST start with:
+Fix:
+
+Example:
+Fix: Restart print spooler
+Fix: Reinstall printer driver
+Fix: Try different USB port
 """
 
 
 # ----------------------------
-# SESSION ID
+# SESSION
 # ----------------------------
 def get_sid():
     if "sid" not in session:
@@ -70,38 +78,57 @@ def ask_ai(messages):
 
 
 # ----------------------------
-# UPDATE CASE MEMORY (NEW CORE FEATURE)
+# UPDATE CASE MEMORY
 # ----------------------------
-def update_case_memory(sid, user_text):
+def update_case_memory(sid, text):
     if sid not in CASE_MEMORY:
-        CASE_MEMORY[sid] = {
-            "facts": {}
-        }
+        CASE_MEMORY[sid] = {"facts": {}}
 
     facts = CASE_MEMORY[sid]["facts"]
+    t = text.lower()
 
-    text = user_text.lower()
-
-    # Detect USB connection
-    if "usb" in text:
+    if "usb" in t:
         facts["connection"] = "usb"
 
-    # Detect WiFi/network
-    if "wifi" in text or "network" in text:
+    if "wifi" in t or "network" in t:
         facts["connection"] = "wifi"
 
-    # Detect OS
-    if "windows 11" in text:
+    if "windows 11" in t:
         facts["os"] = "windows 11"
 
-    if "windows 10" in text:
+    if "windows 10" in t:
         facts["os"] = "windows 10"
 
-    # Printer ready state
-    if "ready" in text:
+    if "ready" in t:
         facts["printer_state"] = "ready"
 
+    if "recognized" in t or "shows up" in t:
+        facts["recognized"] = True
+
+    if "doesn't print" in t or "not printing" in t:
+        facts["printing_failure"] = True
+
     CASE_MEMORY[sid]["facts"] = facts
+
+
+# ----------------------------
+# DETERMINE MODE (NEW CORE LOGIC)
+# ----------------------------
+def should_use_fix_mode(facts):
+    score = 0
+
+    if "connection" in facts:
+        score += 1
+    if "os" in facts:
+        score += 1
+    if "printer_state" in facts:
+        score += 1
+    if "recognized" in facts:
+        score += 1
+    if "printing_failure" in facts:
+        score += 2  # heavier weight
+
+    return score >= 4  # threshold to switch to FIX MODE
 
 
 # ----------------------------
@@ -125,38 +152,41 @@ def chat():
     if not user_input:
         return jsonify({"response": "Empty input."})
 
-    # ----------------------------
-    # Update structured memory
-    # ----------------------------
+    # Update memory
     update_case_memory(sid, user_input)
-
     facts = CASE_MEMORY.get(sid, {}).get("facts", {})
 
-    # ----------------------------
-    # INIT MEMORY
-    # ----------------------------
+    # Init chat history
     if sid not in CHAT_MEMORY:
         CHAT_MEMORY[sid] = []
 
     history = CHAT_MEMORY[sid]
 
     # ----------------------------
-    # BUILD MESSAGE CONTEXT
+    # MODE SWITCH
     # ----------------------------
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    use_fix_mode = should_use_fix_mode(facts)
 
-    # Inject structured case memory (VERY IMPORTANT FIX)
+    if use_fix_mode:
+        system_prompt = FIX_PROMPT
+    else:
+        system_prompt = DIAG_PROMPT
+
+    # ----------------------------
+    # BUILD MESSAGES
+    # ----------------------------
+    messages = [{"role": "system", "content": system_prompt}]
+
     messages.append({
         "role": "system",
         "content": f"""
-KNOWN CASE FACTS:
+KNOWN FACTS:
 {facts}
 
-Do NOT ask about these again.
+If in FIX MODE, do not ask questions.
 """
     })
 
-    # Add chat history
     for m in history[-MAX_HISTORY:]:
         messages.append(m)
 
@@ -164,7 +194,7 @@ Do NOT ask about these again.
 
     reply = ask_ai(messages)
 
-    # Save memory
+    # Save history
     history.append({"role": "user", "content": user_input})
     history.append({"role": "assistant", "content": reply})
 
