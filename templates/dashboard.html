@@ -2,179 +2,158 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AI Helpdesk v15 Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AI Troubleshooting Dashboard v15</title>
+
 <style>
-    body {
-        margin: 0;
-        font-family: Arial, sans-serif;
-        background: #0b1220;
-        color: #e2e8f0;
-        height: 100vh;
-        display: flex;
-        overflow: hidden;
-    }
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #0b1220;
+    color: #e2e8f0;
+    height: 100vh;
+    display: flex;
+}
 
-    /* Sidebar */
-    .sidebar {
-        width: 240px;
-        background: #0f172a;
-        padding: 15px;
-        border-right: 1px solid #1f2937;
-        display: flex;
-        flex-direction: column;
-    }
+/* SIDEBAR */
+.sidebar {
+    width: 240px;
+    background: #0f172a;
+    border-right: 1px solid #1f2937;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+}
 
-    .sidebar h2 {
-        font-size: 14px;
-        margin-bottom: 10px;
-        opacity: 0.9;
-    }
+.sidebar h3 {
+    margin: 0 0 10px 0;
+    font-size: 13px;
+    opacity: 0.8;
+}
 
-    .session-list {
-        flex: 1;
-        overflow-y: auto;
-    }
+.session {
+    padding: 8px;
+    background: #1f2937;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    cursor: pointer;
+}
 
-    .session-item {
-        padding: 8px;
-        margin-bottom: 6px;
-        background: #1f2937;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 12px;
-    }
+/* MAIN */
+.main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
 
-    .session-item:hover {
-        background: #334155;
-    }
+/* CHAT AREA */
+.chat {
+    flex: 1;
+    padding: 15px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
 
-    /* Main */
-    .main {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-    }
+.msg {
+    max-width: 70%;
+    padding: 10px;
+    border-radius: 10px;
+    white-space: pre-wrap;
+    font-size: 13px;
+}
 
-    .topbar {
-        padding: 10px;
-        background: #0f172a;
-        border-bottom: 1px solid #1f2937;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
+.user {
+    background: #2563eb;
+    margin-left: auto;
+}
 
-    .chat {
-        flex: 1;
-        padding: 15px;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-    }
+.bot {
+    background: #1f2937;
+}
 
-    .msg {
-        max-width: 70%;
-        padding: 10px;
-        border-radius: 10px;
-        white-space: pre-wrap;
-        font-size: 13px;
-    }
+/* INPUT */
+.inputbar {
+    display: flex;
+    padding: 10px;
+    border-top: 1px solid #1f2937;
+    background: #0f172a;
+}
 
-    .user {
-        background: #2563eb;
-        margin-left: auto;
-    }
+input {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 6px;
+    background: #1f2937;
+    color: white;
+    outline: none;
+}
 
-    .bot {
-        background: #1f2937;
-    }
+button {
+    margin-left: 10px;
+    padding: 10px 14px;
+    border: none;
+    border-radius: 6px;
+    background: #2563eb;
+    color: white;
+    cursor: pointer;
+}
 
-    /* Input bar now clearly under replies */
-    .input-bar {
-        display: flex;
-        padding: 10px;
-        border-top: 1px solid #1f2937;
-        background: #0f172a;
-    }
+/* RIGHT PANEL */
+.right {
+    width: 280px;
+    background: #0f172a;
+    border-left: 1px solid #1f2937;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
 
-    input {
-        flex: 1;
-        padding: 10px;
-        border-radius: 6px;
-        border: none;
-        outline: none;
-        background: #1f2937;
-        color: white;
-    }
+.card {
+    background: #1f2937;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 12px;
+}
 
-    button {
-        margin-left: 10px;
-        padding: 10px 15px;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-        background: #2563eb;
-        color: white;
-    }
-
-    /* Right panel */
-    .rightpanel {
-        width: 280px;
-        background: #0f172a;
-        border-left: 1px solid #1f2937;
-        padding: 15px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-    }
-
-    .card {
-        background: #1f2937;
-        padding: 10px;
-        border-radius: 8px;
-        font-size: 12px;
-    }
-
-    .quick-btn {
-        background: #334155;
-        padding: 8px;
-        border-radius: 6px;
-        cursor: pointer;
-        margin-top: 6px;
-        font-size: 12px;
-    }
-
-    .quick-btn:hover {
-        background: #475569;
-    }
+.fixbtn {
+    background: #334155;
+    padding: 8px;
+    margin-top: 6px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.fixbtn:hover {
+    background: #475569;
+}
 </style>
 </head>
+
 <body>
 
+<!-- SIDEBAR -->
 <div class="sidebar">
-    <h2>Sessions</h2>
-    <div class="session-list" id="sessions">
-        <div class="session-item">Active Session</div>
-    </div>
+    <h3>SESSIONS</h3>
+    <div class="session">Active Session</div>
 </div>
 
+<!-- MAIN -->
 <div class="main">
-    <div class="topbar">
-        <div>AI Helpdesk v15</div>
-        <button onclick="resetChat()">Reset</button>
-    </div>
 
     <div class="chat" id="chat"></div>
 
-    <div class="input-bar">
+    <div class="inputbar">
         <input id="input" placeholder="Describe the issue..." />
         <button onclick="send()">Send</button>
     </div>
 </div>
 
-<div class="rightpanel">
+<!-- RIGHT PANEL -->
+<div class="right">
     <div class="card">
         <b>Status</b>
         <div id="status">Idle</div>
@@ -186,15 +165,16 @@
     </div>
 
     <div class="card">
-        <b>Quick Fix Actions</b>
-        <div id="fixes">No actions yet</div>
+        <b>Quick Fixes</b>
+        <div id="fixes">None yet</div>
     </div>
 </div>
 
 <script>
+
 let messages = [];
 
-function renderChat() {
+function render() {
     const chat = document.getElementById("chat");
     chat.innerHTML = "";
 
@@ -210,26 +190,24 @@ function renderChat() {
 
 function extractFixes(text) {
     const fixes = [];
-    const lines = text.split("\n");
-
-    lines.forEach(l => {
-        if (l.toLowerCase().includes("fix:")) {
-            fixes.push(l.replace(/fix:/i, "").trim());
+    text.split("\n").forEach(line => {
+        if (line.toLowerCase().includes("fix:")) {
+            fixes.push(line.replace(/fix:/i, "").trim());
         }
     });
 
-    const fixBox = document.getElementById("fixes");
-    fixBox.innerHTML = fixes.length ? "" : "No actions yet";
+    const box = document.getElementById("fixes");
+    box.innerHTML = fixes.length ? "" : "None yet";
 
     fixes.forEach(f => {
-        const btn = document.createElement("div");
-        btn.className = "quick-btn";
-        btn.textContent = f;
-        btn.onclick = () => {
+        const b = document.createElement("div");
+        b.className = "fixbtn";
+        b.innerText = f;
+        b.onclick = () => {
             document.getElementById("input").value = f;
             document.getElementById("input").focus();
         };
-        fixBox.appendChild(btn);
+        box.appendChild(b);
     });
 }
 
@@ -238,8 +216,8 @@ async function send() {
     const text = input.value.trim();
     if (!text) return;
 
-    messages.push({ role: "user", content: text });
-    renderChat();
+    messages.push({role:"user", content:text});
+    render();
 
     input.value = "";
     input.focus();
@@ -249,30 +227,24 @@ async function send() {
     const start = Date.now();
 
     const res = await fetch("/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text })
+        method:"POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({message:text})
     });
 
     const data = await res.json();
 
-    const duration = ((Date.now() - start) / 1000).toFixed(2);
-    document.getElementById("time").innerText = duration + "s";
+    const time = ((Date.now() - start)/1000).toFixed(2);
+    document.getElementById("time").innerText = time + "s";
 
-    messages.push({ role: "assistant", content: data.response });
-    renderChat();
+    messages.push({role:"assistant", content:data.response});
+    render();
 
     extractFixes(data.response);
 
     document.getElementById("status").innerText = "Idle";
 }
 
-async function resetChat() {
-    await fetch("/reset", { method: "POST" });
-    messages = [];
-    renderChat();
-    document.getElementById("fixes").innerHTML = "No actions yet";
-}
 </script>
 
 </body>
