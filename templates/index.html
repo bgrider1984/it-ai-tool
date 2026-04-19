@@ -1,35 +1,279 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>AI Helpdesk v15</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Helpdesk v15 Dashboard</title>
+<style>
+    body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #0b1220;
+        color: #e2e8f0;
+        height: 100vh;
+        display: flex;
+        overflow: hidden;
+    }
+
+    /* Sidebar */
+    .sidebar {
+        width: 240px;
+        background: #0f172a;
+        padding: 15px;
+        border-right: 1px solid #1f2937;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .sidebar h2 {
+        font-size: 14px;
+        margin-bottom: 10px;
+        opacity: 0.9;
+    }
+
+    .session-list {
+        flex: 1;
+        overflow-y: auto;
+    }
+
+    .session-item {
+        padding: 8px;
+        margin-bottom: 6px;
+        background: #1f2937;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 12px;
+    }
+
+    .session-item:hover {
+        background: #334155;
+    }
+
+    /* Main */
+    .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .topbar {
+        padding: 10px;
+        background: #0f172a;
+        border-bottom: 1px solid #1f2937;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .chat {
+        flex: 1;
+        padding: 15px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .msg {
+        max-width: 70%;
+        padding: 10px;
+        border-radius: 10px;
+        white-space: pre-wrap;
+        font-size: 13px;
+    }
+
+    .user {
+        background: #2563eb;
+        margin-left: auto;
+    }
+
+    .bot {
+        background: #1f2937;
+    }
+
+    /* Input bar now clearly under replies */
+    .input-bar {
+        display: flex;
+        padding: 10px;
+        border-top: 1px solid #1f2937;
+        background: #0f172a;
+    }
+
+    input {
+        flex: 1;
+        padding: 10px;
+        border-radius: 6px;
+        border: none;
+        outline: none;
+        background: #1f2937;
+        color: white;
+    }
+
+    button {
+        margin-left: 10px;
+        padding: 10px 15px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        background: #2563eb;
+        color: white;
+    }
+
+    /* Right panel */
+    .rightpanel {
+        width: 280px;
+        background: #0f172a;
+        border-left: 1px solid #1f2937;
+        padding: 15px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .card {
+        background: #1f2937;
+        padding: 10px;
+        border-radius: 8px;
+        font-size: 12px;
+    }
+
+    .quick-btn {
+        background: #334155;
+        padding: 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        margin-top: 6px;
+        font-size: 12px;
+    }
+
+    .quick-btn:hover {
+        background: #475569;
+    }
+</style>
 </head>
 <body>
-    <h2>AI Troubleshooting Assistant v15</h2>
 
-    <textarea id="input" rows="4" cols="60"></textarea><br>
-    <button onclick="send()">Send</button>
-    <button onclick="resetChat()">Reset</button>
+<div class="sidebar">
+    <h2>Sessions</h2>
+    <div class="session-list" id="sessions">
+        <div class="session-item">Active Session</div>
+    </div>
+</div>
 
-    <pre id="output"></pre>
+<div class="main">
+    <div class="topbar">
+        <div>AI Helpdesk v15</div>
+        <button onclick="resetChat()">Reset</button>
+    </div>
 
-    <script>
-        async function send() {
-            const msg = document.getElementById("input").value;
+    <div class="chat" id="chat"></div>
 
-            const res = await fetch("/chat", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({message: msg})
-            });
+    <div class="input-bar">
+        <input id="input" placeholder="Describe the issue..." />
+        <button onclick="send()">Send</button>
+    </div>
+</div>
 
-            const data = await res.json();
-            document.getElementById("output").innerText = data.response;
+<div class="rightpanel">
+    <div class="card">
+        <b>Status</b>
+        <div id="status">Idle</div>
+    </div>
+
+    <div class="card">
+        <b>Response Time</b>
+        <div id="time">-</div>
+    </div>
+
+    <div class="card">
+        <b>Quick Fix Actions</b>
+        <div id="fixes">No actions yet</div>
+    </div>
+</div>
+
+<script>
+let messages = [];
+
+function renderChat() {
+    const chat = document.getElementById("chat");
+    chat.innerHTML = "";
+
+    messages.forEach(m => {
+        const div = document.createElement("div");
+        div.className = "msg " + (m.role === "user" ? "user" : "bot");
+        div.textContent = m.content;
+        chat.appendChild(div);
+    });
+
+    chat.scrollTop = chat.scrollHeight;
+}
+
+function extractFixes(text) {
+    const fixes = [];
+    const lines = text.split("\n");
+
+    lines.forEach(l => {
+        if (l.toLowerCase().includes("fix:")) {
+            fixes.push(l.replace(/fix:/i, "").trim());
         }
+    });
 
-        async function resetChat() {
-            await fetch("/reset", {method: "POST"});
-            document.getElementById("output").innerText = "Reset complete.";
-        }
-    </script>
+    const fixBox = document.getElementById("fixes");
+    fixBox.innerHTML = fixes.length ? "" : "No actions yet";
+
+    fixes.forEach(f => {
+        const btn = document.createElement("div");
+        btn.className = "quick-btn";
+        btn.textContent = f;
+        btn.onclick = () => {
+            document.getElementById("input").value = f;
+            document.getElementById("input").focus();
+        };
+        fixBox.appendChild(btn);
+    });
+}
+
+async function send() {
+    const input = document.getElementById("input");
+    const text = input.value.trim();
+    if (!text) return;
+
+    messages.push({ role: "user", content: text });
+    renderChat();
+
+    input.value = "";
+    input.focus();
+
+    document.getElementById("status").innerText = "Analyzing...";
+
+    const start = Date.now();
+
+    const res = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text })
+    });
+
+    const data = await res.json();
+
+    const duration = ((Date.now() - start) / 1000).toFixed(2);
+    document.getElementById("time").innerText = duration + "s";
+
+    messages.push({ role: "assistant", content: data.response });
+    renderChat();
+
+    extractFixes(data.response);
+
+    document.getElementById("status").innerText = "Idle";
+}
+
+async function resetChat() {
+    await fetch("/reset", { method: "POST" });
+    messages = [];
+    renderChat();
+    document.getElementById("fixes").innerHTML = "No actions yet";
+}
+</script>
+
 </body>
 </html>
