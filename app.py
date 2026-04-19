@@ -1,219 +1,82 @@
 import os
 import uuid
-from datetime import datetime
-from flask import Flask, request, jsonify, session, redirect, render_template
-from flask_sqlalchemy import SQLAlchemy
+from flask import Flask, request, jsonify, session, render_template
 
 app = Flask(__name__)
-
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = True
-
-app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///local.db")
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
-db = SQLAlchemy(app)
-
 # ----------------------------
-# USERS / INVITES (BETA SIMPLE)
+# SESSION STORE
 # ----------------------------
-USERS = {
-    "admin@local": {"password": "admin", "is_admin": True}
-}
-
-INVITES = set()
-
-# ----------------------------
-# CHAT HISTORY MODEL
-# ----------------------------
-class ChatHistory(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user = db.Column(db.String(120))
-    role = db.Column(db.String(20))
-    message = db.Column(db.Text)
-    session_id = db.Column(db.String(80))
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-
-# ----------------------------
-# SESSION MEMORY (IN-MEMORY INDEX)
-# ----------------------------
-SESSION_INDEX = {}
-
 sessions = {}
+
+def get_state():
+    if "sid" not in session:
+        sid = str(uuid.uuid4())
+        session["sid"] = sid
+        sessions[sid] = {"step": 0}
+
+    return sessions[session["sid"]]
 
 # ----------------------------
 # HELPERS
 # ----------------------------
-def get_session_title(message):
-    t = message.lower()
-    if "vpn" in t:
-        return "VPN Issue"
-    if "outlook" in t:
-        return "Outlook Issue"
-    if "login" in t:
-        return "Login Issue"
-    if "crash" in t:
-        return "System Crash"
-    if "slow" in t:
-        return "Performance Issue"
-    return "General IT Issue"
+def yes(msg):
+    return msg in ["y","yes","yeah","yep","fixed","works","working","ok","good"]
 
-def get_session():
-    sid = session.get("sid")
+def no(msg):
+    return msg in ["n","no","nope","still","not"]
 
-    if not sid:
-        sid = str(uuid.uuid4())
-        session["sid"] = sid
-        sessions[sid] = {"step": 0, "history": []}
-
-    return sid
+def contains(msg, words):
+    return any(w in msg for w in words)
 
 # ----------------------------
-# ROUTES
-# ----------------------------
-@app.route("/")
-def home():
-    return render_template("index.html")
-
-@app.route("/dashboard")
-def dashboard():
-    if not session.get("user"):
-        return redirect("/")
-    return render_template("dashboard.html")
-
-# ----------------------------
-# LOGIN (BETA SIMPLE)
-# ----------------------------
-@app.route("/login", methods=["POST"])
-def login():
-    data = request.json
-
-    user = USERS.get(data.get("email"))
-
-    if not user or user["password"] != data.get("password"):
-        return jsonify({"error": "invalid login"}), 401
-
-    session["user"] = data.get("email")
-    session.modified = True
-
-    return jsonify({"status": "ok"})
-
-# ----------------------------
-# ASK (COPILOT RESPONSE + HISTORY SAVE)
+# MAIN ENGINE (SAFE)
 # ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
+    try:
+        data = request.get_json(force=True)
+        msg = (data.get("message") or "").lower().strip()
 
-    if not session.get("user"):
-        return jsonify({"error": "unauthorized"}), 401
+        state = get_state()
+        step = state["step"]
 
-    data = request.json
-    message = data.get("message", "")
+        print(f"[DEBUG] Step: {step}, Msg: {msg}")
 
-    sid = get_session()
+        # ---------------- STEP 0
+        if step == 0:
+            state["step"] = 1
+            return jsonify({
+                "response": "Step 1: Restart your computer\n\nDid that fix the issue?",
+                "step": 1,
+                "options": ["Yes","No"]
+            })
 
-    # create session index entry if new
-    if sid not in SESSION_INDEX:
-        SESSION_INDEX[sid] = {
-            "title": get_session_title(message),
-            "created": str(datetime.utcnow())
-        }
+        # ---------------- STEP 1
+        if step == 1:
+            if yes(msg):
+                return jsonify({"response": "Great — fixed 👍"})
+            state["step"] = 2
+            return jsonify({
+                "response": "Step 2: Check wireless interference\n\nIs it still happening?",
+                "step": 2,
+                "options": ["Yes","No"]
+            })
 
-    # simple AI logic (beta)
-    msg = message.lower()
+        # ---------------- STEP 2
+        if step == 2:
+            if yes(msg):
+                state["step"] = 3
+                return jsonify({
+                    "response": "Step 3: Try different USB port\n\nDid that fix it?",
+                    "step": 3,
+                    "options": ["Yes","No"]
+                })
+            return jsonify({"response": "Good — resolved 👍"})
 
-    if "vpn" in msg:
-        reply = "Check VPN connection → reconnect client."
-    elif "outlook" in msg:
-        reply = "Restart Outlook → try Safe Mode."
-    elif "crash" in msg:
-        reply = "Check Task Manager → CPU/RAM usage."
-    elif "slow" in msg:
-        reply = "Check disk usage and background processes."
-    else:
-        reply = "Restart device and re-test issue."
-
-    # SAVE USER MESSAGE
-    db.session.add(ChatHistory(
-        user=session["user"],
-        role="user",
-        message=message,
-        session_id=sid
-    ))
-
-    # SAVE ASSISTANT MESSAGE
-    db.session.add(ChatHistory(
-        user=session["user"],
-        role="assistant",
-        message=reply,
-        session_id=sid
-    ))
-
-    db.session.commit()
-
-    return jsonify({
-        "response": reply,
-        "session_id": sid
-    })
-
-# ----------------------------
-# LIST SESSIONS (SIDEBAR)
-# ----------------------------
-@app.route("/sessions")
-def sessions_list():
-
-    if not session.get("user"):
-        return jsonify({"error": "unauthorized"}), 401
-
-    return jsonify([
-        {
-            "session_id": sid,
-            "title": data["title"],
-            "created": data["created"]
-        }
-        for sid, data in SESSION_INDEX.items()
-    ])
-
-# ----------------------------
-# LOAD SESSION HISTORY
-# ----------------------------
-@app.route("/load_session/<sid>")
-def load_session(sid):
-
-    if not session.get("user"):
-        return jsonify({"error": "unauthorized"}), 401
-
-    chats = ChatHistory.query.filter_by(
-        session_id=sid
-    ).order_by(ChatHistory.timestamp.asc()).all()
-
-    return jsonify([
-        {
-            "role": c.role,
-            "message": c.message
-        }
-        for c in chats
-    ])
-
-# ----------------------------
-# HEALTH
-# ----------------------------
-@app.route("/health")
-def health():
-    return jsonify({
-        "status": "ok",
-        "users": len(USERS),
-        "sessions": len(SESSION_INDEX),
-        "history_rows": ChatHistory.query.count()
-    })
-
-# ----------------------------
-# INIT DB
-# ----------------------------
-if __name__ == "__main__":
-    with app.app_context():
-        db.create_all()
-
-    app.run(host="0.0.0.0", port=10000)
+        # ---------------- STEP 3
+        if step == 3:
+            if yes(msg):
+                return jsonify({"response": "Great — fixed 👍"})
+            state["step"] = 
