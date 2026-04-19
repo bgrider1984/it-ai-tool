@@ -1,264 +1,160 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>AI Troubleshooting Dashboard v15</title>
-
+<title>AI Helpdesk</title>
 <style>
-body {
-    margin: 0;
-    font-family: Arial, sans-serif;
-    background: #0b1220;
-    color: #e2e8f0;
-    height: 100vh;
-    display: flex;
-    overflow: hidden;
-}
+body { margin:0; display:flex; background:#0b1220; color:white; font-family:Arial; }
 
-/* SIDEBAR */
-.sidebar {
-    width: 240px;
-    background: #0f172a;
-    border-right: 1px solid #1f2937;
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-}
+/* LEFT */
+.sidebar { width:200px; background:#0f172a; padding:10px; }
 
-.sidebar h3 {
-    margin: 0 0 10px 0;
-    font-size: 13px;
-    opacity: 0.8;
-}
+/* CENTER */
+.main { flex:1; display:flex; flex-direction:column; }
 
-.session {
-    padding: 8px;
-    background: #1f2937;
-    border-radius: 6px;
-    margin-bottom: 6px;
-    font-size: 12px;
-}
+.chat { flex:1; padding:10px; overflow-y:auto; }
 
-/* MAIN */
-.main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-}
+.msg { padding:10px; margin:5px; border-radius:8px; max-width:70%; }
+.user { background:#2563eb; margin-left:auto; }
+.bot { background:#1f2937; }
 
-/* CHAT */
-.chat {
-    flex: 1;
-    padding: 15px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.msg {
-    max-width: 70%;
-    padding: 10px;
-    border-radius: 10px;
-    white-space: pre-wrap;
-    font-size: 13px;
-}
-
-.user {
-    background: #2563eb;
-    margin-left: auto;
-}
-
-.bot {
-    background: #1f2937;
-}
-
-/* INPUT */
-.inputbar {
-    display: flex;
-    padding: 10px;
-    border-top: 1px solid #1f2937;
-    background: #0f172a;
-}
-
-input {
-    flex: 1;
-    padding: 10px;
-    border: none;
-    border-radius: 6px;
-    background: #1f2937;
-    color: white;
-    outline: none;
-}
-
-button {
-    margin-left: 10px;
-    padding: 10px 14px;
-    border: none;
-    border-radius: 6px;
-    background: #2563eb;
-    color: white;
-    cursor: pointer;
-}
+.inputbar { display:flex; padding:10px; }
+input { flex:1; padding:10px; background:#1f2937; color:white; border:none; }
+button { margin-left:10px; }
 
 /* RIGHT PANEL */
-.right {
-    width: 280px;
-    background: #0f172a;
-    border-left: 1px solid #1f2937;
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
+.right { width:300px; background:#0f172a; padding:10px; }
 
-.card {
-    background: #1f2937;
-    padding: 10px;
-    border-radius: 8px;
-    font-size: 12px;
-}
+.card { background:#1f2937; padding:10px; margin-bottom:10px; }
 
-.fixbtn {
-    background: #334155;
-    padding: 8px;
-    margin-top: 6px;
-    border-radius: 6px;
-    cursor: pointer;
-}
-
-.fixbtn:hover {
-    background: #475569;
-}
+.fixbtn { background:#334155; padding:6px; margin-top:5px; cursor:pointer; }
+.fixbtn:hover { background:#475569; }
 </style>
 </head>
 
 <body>
 
-<!-- SIDEBAR -->
 <div class="sidebar">
-    <h3>SESSIONS</h3>
-    <div class="session">Active Session</div>
+    <b>Sessions</b>
 </div>
 
-<!-- MAIN -->
 <div class="main">
-
-    <div class="chat" id="chat"></div>
+    <div id="chat" class="chat"></div>
 
     <div class="inputbar">
-        <input id="input" placeholder="Describe the issue..." />
+        <input id="input" />
         <button onclick="send()">Send</button>
     </div>
-
 </div>
 
-<!-- RIGHT PANEL -->
 <div class="right">
+
     <div class="card">
         <b>Status</b>
-        <div id="status">Idle</div>
+        <div id="mode">Diagnostic</div>
     </div>
 
     <div class="card">
-        <b>Response Time</b>
-        <div id="time">-</div>
+        <b>Case Facts</b>
+        <div id="facts"></div>
+    </div>
+
+    <div class="card">
+        <b>Diagnostic Tree</b>
+        <div id="tree"></div>
     </div>
 
     <div class="card">
         <b>Quick Fixes</b>
-        <div id="fixes">None yet</div>
+        <div id="fixes"></div>
     </div>
+
 </div>
 
 <script>
-
 let messages = [];
 
 function render() {
     const chat = document.getElementById("chat");
     chat.innerHTML = "";
-
     messages.forEach(m => {
-        const div = document.createElement("div");
-        div.className = "msg " + (m.role === "user" ? "user" : "bot");
-        div.textContent = m.content;
-        chat.appendChild(div);
+        let d = document.createElement("div");
+        d.className = "msg " + (m.role==="user"?"user":"bot");
+        d.innerText = m.content;
+        chat.appendChild(d);
+    });
+}
+
+function updateFacts(facts, fixMode) {
+    const f = document.getElementById("facts");
+    f.innerHTML = "";
+
+    Object.keys(facts).forEach(k => {
+        let div = document.createElement("div");
+        div.innerText = k + ": " + facts[k];
+        f.appendChild(div);
     });
 
-    chat.scrollTop = chat.scrollHeight;
+    document.getElementById("mode").innerText = fixMode ? "FIX MODE" : "Diagnostic";
+
+    // Diagnostic tree
+    const tree = document.getElementById("tree");
+    tree.innerHTML = "";
+
+    ["connection","os","printer","recognized","issue"].forEach(key => {
+        let div = document.createElement("div");
+        if (facts[key]) {
+            div.innerText = "✔ " + key;
+        } else {
+            div.innerText = "○ " + key;
+        }
+        tree.appendChild(div);
+    });
 }
 
 function extractFixes(text) {
-    const fixes = [];
+    const box = document.getElementById("fixes");
+    box.innerHTML = "";
 
     text.split("\n").forEach(line => {
         if (line.toLowerCase().includes("fix:")) {
-            fixes.push(line.replace(/fix:/i, "").trim());
+            let b = document.createElement("div");
+            b.className = "fixbtn";
+            b.innerText = line.replace(/fix:/i,"");
+            box.appendChild(b);
         }
-    });
-
-    const box = document.getElementById("fixes");
-    box.innerHTML = fixes.length ? "" : "None yet";
-
-    fixes.forEach(f => {
-        const b = document.createElement("div");
-        b.className = "fixbtn";
-        b.innerText = f;
-
-        b.onclick = () => {
-            const input = document.getElementById("input");
-            input.value = f;
-            input.focus();
-        };
-
-        box.appendChild(b);
     });
 }
 
 async function send() {
-    const input = document.getElementById("input");
-    const text = input.value.trim();
+    let input = document.getElementById("input");
+    let text = input.value;
     if (!text) return;
 
-    messages.push({ role: "user", content: text });
+    messages.push({role:"user", content:text});
     render();
 
     input.value = "";
     input.focus();
 
-    document.getElementById("status").innerText = "Analyzing...";
-
-    const start = Date.now();
-
-    const res = await fetch("/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text })
+    let res = await fetch("/chat", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({message:text})
     });
 
-    const data = await res.json();
+    let data = await res.json();
 
-    const time = ((Date.now() - start) / 1000).toFixed(2);
-    document.getElementById("time").innerText = time + "s";
-
-    messages.push({ role: "assistant", content: data.response });
+    messages.push({role:"assistant", content:data.response});
     render();
 
+    updateFacts(data.facts, data.fix_mode);
     extractFixes(data.response);
-
-    document.getElementById("status").innerText = "Idle";
 }
 
-/* ENTER KEY SUPPORT */
-document.getElementById("input").addEventListener("keydown", function(event) {
-    if (event.key === "Enter" && !event.shiftKey) {
-        event.preventDefault();
-        send();
-    }
+// ENTER KEY
+document.getElementById("input").addEventListener("keydown", e=>{
+    if(e.key==="Enter"){ e.preventDefault(); send(); }
 });
-
 </script>
 
 </body>
