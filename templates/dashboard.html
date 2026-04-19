@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>AI Helpdesk Copilot V7</title>
+<title>Smart Helpdesk Copilot v8</title>
 
 <style>
 body {
@@ -26,7 +26,7 @@ body {
     margin-top:0;
 }
 
-/* MAIN */
+/* MAIN AREA */
 .main {
     flex:1;
     display:flex;
@@ -61,7 +61,7 @@ body {
     background:#374151;
 }
 
-/* INPUT AREA */
+/* INPUT */
 .input-area {
     display:flex;
     gap:10px;
@@ -89,18 +89,26 @@ button:hover {
     background:#16a34a;
 }
 
-/* SESSION ITEMS */
-.session {
-    background:#1f2937;
-    padding:8px;
-    margin:6px 0;
-    border-radius:6px;
-    cursor:pointer;
-    font-size:14px;
+/* QUICK ACTIONS */
+#quickActions {
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-top:10px;
 }
 
-.session:hover {
-    background:#374151;
+.quick-btn {
+    background:#334155;
+    border:none;
+    color:white;
+    padding:8px 10px;
+    border-radius:6px;
+    cursor:pointer;
+    font-size:13px;
+}
+
+.quick-btn:hover {
+    background:#475569;
 }
 
 /* TOP BAR */
@@ -113,7 +121,6 @@ button:hover {
 
 .small-btn {
     background:#ef4444;
-    margin-left:10px;
 }
 
 .small-btn:hover {
@@ -128,7 +135,7 @@ button:hover {
 <!-- SIDEBAR -->
 <div class="sidebar">
     <h3>Sessions</h3>
-    <button onclick="newSession()">+ New Issue</button>
+    <button onclick="resetChat()">+ New Issue</button>
     <div id="sessionList"></div>
 </div>
 
@@ -136,11 +143,14 @@ button:hover {
 <div class="main">
 
     <div class="topbar">
-        <h2>AI Helpdesk Copilot V7</h2>
-        <button class="small-btn" onclick="resetChat()">Reset Chat</button>
+        <h2>Smart Helpdesk Copilot v8</h2>
+        <button class="small-btn" onclick="resetChat()">Reset</button>
     </div>
 
     <div id="chat" class="chat"></div>
+
+    <!-- QUICK ACTIONS -->
+    <div id="quickActions"></div>
 
     <div class="input-area">
         <input id="input" placeholder="Describe your issue..." />
@@ -153,7 +163,6 @@ button:hover {
 
 const chat = document.getElementById("chat");
 const input = document.getElementById("input");
-const sessionList = document.getElementById("sessionList");
 
 // ----------------------------
 // ADD MESSAGE
@@ -168,7 +177,32 @@ function addMessage(text, type){
 }
 
 // ----------------------------
-// SEND MESSAGE (SAFE)
+// QUICK ACTIONS RENDER
+// ----------------------------
+function renderQuickActions(actions){
+
+    const box = document.getElementById("quickActions");
+    box.innerHTML = "";
+
+    if(!actions || actions.length === 0) return;
+
+    actions.forEach(action => {
+
+        const btn = document.createElement("button");
+        btn.className = "quick-btn";
+        btn.textContent = action;
+
+        btn.onclick = () => {
+            input.value = action;
+            sendMessage();
+        };
+
+        box.appendChild(btn);
+    });
+}
+
+// ----------------------------
+// SEND MESSAGE (ROBUST)
 // ----------------------------
 async function sendMessage(){
 
@@ -179,6 +213,7 @@ async function sendMessage(){
     input.value = "";
 
     try {
+
         const res = await fetch("/ask", {
             method: "POST",
             headers: {"Content-Type":"application/json"},
@@ -188,24 +223,23 @@ async function sendMessage(){
         const data = await res.json();
 
         if(!res.ok){
-            addMessage("⚠ Server error: " + (data.response || "unknown"), "bot");
+            addMessage("⚠ Error: " + (data.response || "Server issue"), "bot");
             return;
         }
 
-        if(data.response){
-            addMessage(data.response, "bot");
-        } else {
-            addMessage("⚠ No response received", "bot");
-        }
+        addMessage(data.response || "No response received", "bot");
+
+        // render AI quick actions
+        renderQuickActions(data.quick_actions);
 
     } catch (err) {
         console.error(err);
-        addMessage("⚠ Network error connecting to server", "bot");
+        addMessage("⚠ Network error contacting server", "bot");
     }
 }
 
 // ----------------------------
-// ENTER KEY SUPPORT
+// ENTER KEY FIX
 // ----------------------------
 input.addEventListener("keydown", function(e){
     if(e.key === "Enter"){
@@ -220,30 +254,22 @@ input.addEventListener("keydown", function(e){
 async function resetChat(){
     await fetch("/reset", {method:"POST"});
     chat.innerHTML = "";
-    addMessage("New session started. Describe your issue.", "bot");
+    document.getElementById("quickActions").innerHTML = "";
+    addMessage("New issue started. Describe your problem.", "bot");
 }
 
 // ----------------------------
-// NEW SESSION (UI ONLY FOR NOW)
-// ----------------------------
-function newSession(){
-    chat.innerHTML = "";
-    addMessage("New issue started.", "bot");
-}
-
-// ----------------------------
-// SESSION LIST (placeholder safe)
+// PLACEHOLDER SESSIONS
 // ----------------------------
 function loadSessions(){
-    sessionList.innerHTML = "";
+    const box = document.getElementById("sessionList");
+    box.innerHTML = "";
 
-    // placeholder until backend session expansion
     const item = document.createElement("div");
-    item.className = "session";
+    item.className = "msg bot";
     item.textContent = "Current Session";
-    item.onclick = resetChat;
 
-    sessionList.appendChild(item);
+    box.appendChild(item);
 }
 
 loadSessions();
