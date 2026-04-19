@@ -1,125 +1,35 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<title>IT Copilot Login</title>
-
-<style>
-body {
-    font-family: Arial;
-    background:#0b1220;
-    color:white;
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    height:100vh;
-}
-
-.container {
-    background:#111827;
-    padding:20px;
-    border-radius:10px;
-    width:320px;
-}
-
-input {
-    width:100%;
-    padding:10px;
-    margin:5px 0;
-    border:none;
-    border-radius:6px;
-}
-
-button {
-    width:100%;
-    padding:10px;
-    margin-top:10px;
-    background:#22c55e;
-    border:none;
-    border-radius:6px;
-    color:white;
-    cursor:pointer;
-}
-
-h2 {
-    text-align:center;
-}
-
-small {
-    color:#9ca3af;
-}
-</style>
+    <title>AI Helpdesk v15</title>
 </head>
-
 <body>
+    <h2>AI Troubleshooting Assistant v15</h2>
 
-<div class="container">
+    <textarea id="input" rows="4" cols="60"></textarea><br>
+    <button onclick="send()">Send</button>
+    <button onclick="resetChat()">Reset</button>
 
-<h2>IT Copilot</h2>
+    <pre id="output"></pre>
 
-<input id="email" placeholder="Email">
-<input id="password" type="password" placeholder="Password">
+    <script>
+        async function send() {
+            const msg = document.getElementById("input").value;
 
-<!-- 🔥 NEW: INVITE CODE FIELD -->
-<input id="invite" placeholder="Invite Code (required for signup)">
+            const res = await fetch("/chat", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({message: msg})
+            });
 
-<button onclick="signup()">Sign Up</button>
-<button onclick="login()">Login</button>
+            const data = await res.json();
+            document.getElementById("output").innerText = data.response;
+        }
 
-<small>Ask admin for invite code</small>
-
-</div>
-
-<script>
-
-async function signup(){
-
-    const email = document.getElementById("email").value;
-    const password = document.getElementById("password").value;
-    const invite_code = document.getElementById("invite").value;
-
-    const res = await fetch("/signup", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        credentials:"include",
-        body: JSON.stringify({
-            email,
-            password,
-            invite_code   // ✅ FIXED: now sent correctly
-        })
-    });
-
-    const data = await res.json();
-
-    if(res.ok){
-        alert("Account created. You can now login.");
-    } else {
-        alert(data.error || "Signup failed");
-    }
-}
-
-async function login(){
-
-    const email = document.getElementById("email").value;
-    const password = document.getElementById("password").value;
-
-    const res = await fetch("/login", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        credentials:"include",
-        body: JSON.stringify({ email, password })
-    });
-
-    const data = await res.json();
-
-    if(res.ok){
-        window.location.href = "/dashboard";
-    } else {
-        alert(data.error || "Login failed");
-    }
-}
-
-</script>
-
+        async function resetChat() {
+            await fetch("/reset", {method: "POST"});
+            document.getElementById("output").innerText = "Reset complete.";
+        }
+    </script>
 </body>
 </html>
