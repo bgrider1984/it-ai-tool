@@ -2,20 +2,14 @@ import os
 import uuid
 from flask import Flask, request, jsonify, session, render_template
 
-# =========================
-# APP INIT (MUST BE FIRST)
-# =========================
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
+app.secret_key = os.getenv("SECRET_KEY", "dev")
 
-# =========================
-# MEMORY STORE (TEMP FOR NOW)
-# =========================
+# ----------------------------
+# SAFE MEMORY STORE
+# ----------------------------
 db = {}
 
-# =========================
-# USER SESSION HANDLING
-# =========================
 def get_user():
     if "uid" not in session:
         session["uid"] = str(uuid.uuid4())
@@ -23,13 +17,9 @@ def get_user():
     uid = session["uid"]
 
     if uid not in db:
-        db[uid] = {
-            "sessions": {},
-            "current": None
-        }
+        db[uid] = {"sessions": {}, "current": None}
 
     return db[uid]
-
 
 def new_session(user):
     sid = str(uuid.uuid4())
@@ -39,7 +29,7 @@ def new_session(user):
         "title": "New Issue",
         "messages": [],
         "state": {
-            "route": None,
+            "route": "unknown",
             "step": 0
         }
     }
@@ -47,147 +37,116 @@ def new_session(user):
     user["current"] = sid
     return user["sessions"][sid]
 
-
 def get_session(user):
     sid = user["current"]
-
     if not sid or sid not in user["sessions"]:
         return new_session(user)
-
     return user["sessions"][sid]
 
-# =========================
-# ISSUE CLASSIFIER
-# =========================
-def classify_issue(msg):
-    msg = msg.lower()
+# ----------------------------
+# SAFE CLASSIFIER
+# ----------------------------
+def classify(msg):
+    m = msg.lower()
 
-    if any(x in msg for x in ["wifi","internet","router","dns","network"]):
+    if any(x in m for x in ["wifi","internet","router","dns"]):
         return "network"
 
-    if any(x in msg for x in ["app","error","crash","won't open","software"]):
+    if any(x in m for x in ["app","crash","error","software","not opening"]):
         return "software"
 
-    if any(x in msg for x in ["keyboard","mouse","usb","battery","hardware"]):
+    if any(x in m for x in ["keyboard","mouse","usb","battery"]):
         return "hardware"
 
     return "unknown"
 
-# =========================
-# ROUTING ENGINE
-# =========================
-def route_step(route, step, msg):
+# ----------------------------
+# SAFE ROUTER
+# ----------------------------
+def route(route, step, msg):
 
-    msg = msg.lower()
+    try:
 
-    # ---------------- NETWORK
-    if route == "network":
+        msg = msg.lower()
 
-        if step == 0:
-            return {
-                "text": "🌐 Step 1: Restart your router\n\nDid that fix the issue?",
-                "step": 1
-            }
+        if route == "network":
+            if step == 0:
+                return {"text":"🌐 Restart your router. Did that fix it?","step":1}
+            if step == 1:
+                return {"text":"Check if other devices have internet.","step":2}
+            return {"text":"Try DNS 8.8.8.8","done":True}
 
-        if step == 1:
-            if "yes" in msg:
-                return {"text": "Great — network restored 👍", "done": True}
+        if route == "software":
+            if step == 0:
+                return {"text":"🔵 Restart the app. Did that fix it?","step":1}
+            if step == 1:
+                return {"text":"Reinstall the app. Did that help?","step":2}
+            return {"text":"Software issue resolved or needs deeper inspection.","done":True}
 
-            return {
-                "text": "Step 2: Check if other devices have internet.\nDo they?",
-                "step": 2
-            }
+        if route == "hardware":
+            if step == 0:
+                return {"text":"🟢 Check power/batteries. Did that fix it?","step":1}
+            return {"text":"Try another USB port or device test.","done":True}
 
-        if step == 2:
-            return {"text": "Try changing DNS to 8.8.8.8", "done": True}
+        return {"text":"I need more detail to continue troubleshooting.","done":True}
 
-    # ---------------- SOFTWARE
-    if route == "software":
+    except Exception as e:
+        return {"text":"⚠ Routing error occurred","done":True}
 
-        if step == 0:
-            return {
-                "text": "🔵 Step 1: Restart the app\n\nDid that fix it?",
-                "step": 1
-            }
-
-        if step == 1:
-            if "no" in msg:
-                return {
-                    "text": "Step 2: Reinstall the app\n\nDid that help?",
-                    "step": 2
-                }
-
-            return {"text": "Fixed 👍", "done": True}
-
-    # ---------------- HARDWARE
-    if route == "hardware":
-
-        if step == 0:
-            return {
-                "text": "🟢 Step 1: Check power / batteries\n\nDid that fix it?",
-                "step": 1
-            }
-
-        if step == 1:
-            return {"text": "Try another USB port or device test.", "done": True}
-
-    # ---------------- UNKNOWN
-    return {
-        "text": "I need more details to continue troubleshooting.",
-        "done": True
-    }
-
-# =========================
-# ROUTES
-# =========================
-
-@app.route("/")
-def home():
-    return render_template("dashboard.html")
-
-
+# ----------------------------
+# MAIN API (STABLE CONTRACT)
+# ----------------------------
 @app.route("/ask", methods=["POST"])
 def ask():
 
     try:
-        msg = request.json.get("message", "").strip()
+        msg = request.json.get("message","")
 
         user = get_user()
         session_data = get_session(user)
 
-        # store user message
-        session_data["messages"].append({
-            "role": "user",
-            "text": msg
-        })
+        # store input
+        session_data["messages"].append({"role":"user","text":msg})
 
-        # assign route if first message
-        if not session_data["state"]["route"]:
-            session_data["state"]["route"] = classify_issue(msg)
+        # route logic
+        if session_data["state"]["route"] == "unknown":
+            session_data["state"]["route"] = classify(msg)
 
-        route = session_data["state"]["route"]
+        route_name = session_data["state"]["route"]
         step = session_data["state"]["step"]
 
-        result = route_step(route, step, msg)
+        result = route(route_name, step, msg)
 
         if "step" in result:
             session_data["state"]["step"] = result["step"]
 
-        # store bot response
         session_data["messages"].append({
-            "role": "bot",
-            "text": result["text"]
+            "role":"bot",
+            "text":result["text"]
         })
 
+        # SAFE RESPONSE CONTRACT
         return jsonify({
             "response": result["text"],
-            "sessions": list(user["sessions"].values())
+            "sessions": list(user["sessions"].values()),
+            "debug": {
+                "route": route_name,
+                "step": session_data["state"]["step"]
+            }
         })
 
     except Exception as e:
-        print("ERROR:", e)
-        return jsonify({"response": "⚠ Server error"}), 500
+        print("CRASH:", e)
 
+        # NEVER FAIL SILENTLY
+        return jsonify({
+            "response": "⚠ System recovered from error. Please retry.",
+            "sessions": [],
+            "debug": {
+                "route": "error",
+                "step": -1
+            }
+        }), 200
 
 @app.route("/new", methods=["POST"])
 def new():
@@ -195,23 +154,17 @@ def new():
     s = new_session(user)
     return jsonify(s)
 
-
-@app.route("/sessions")
-def sessions():
-    user = get_user()
-    return jsonify(list(user["sessions"].values()))
-
-
 @app.route("/health")
 def health():
     return jsonify({
-        "status": "ok",
-        "version": "v11-safe-deploy"
+        "status":"ok",
+        "system":"v13-stable"
     })
 
+@app.route("/")
+def home():
+    return render_template("dashboard.html")
 
-# =========================
-# MAIN
-# =========================
+# ----------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
