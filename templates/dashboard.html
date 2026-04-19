@@ -1,118 +1,252 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Helpdesk Copilot</title>
+<title>AI Helpdesk Copilot V7</title>
 
 <style>
-body { display:flex; margin:0; font-family:Arial; background:#0b1220; color:white; }
-.sidebar { width:250px; background:#111827; padding:10px; }
-.main { flex:1; padding:20px; }
-.chat { height:60vh; overflow:auto; background:#1f2937; padding:10px; border-radius:10px; }
-.msg { margin:8px 0; padding:10px; border-radius:8px; }
-.user { background:#2563eb; }
-.bot { background:#374151; }
-input { width:80%; padding:10px; }
-button { padding:10px; margin:5px; cursor:pointer; }
-.session { background:#1f2937; padding:5px; margin:5px 0; cursor:pointer; }
-</style>
+body {
+    margin:0;
+    font-family: Arial, sans-serif;
+    background:#0b1220;
+    color:white;
+    display:flex;
+    height:100vh;
+}
 
+/* SIDEBAR */
+.sidebar {
+    width:260px;
+    background:#111827;
+    padding:12px;
+    overflow-y:auto;
+    border-right:1px solid #1f2937;
+}
+
+.sidebar h3 {
+    margin-top:0;
+}
+
+/* MAIN */
+.main {
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    padding:20px;
+}
+
+/* CHAT */
+.chat {
+    flex:1;
+    background:#1f2937;
+    border-radius:10px;
+    padding:15px;
+    overflow-y:auto;
+    margin-bottom:10px;
+}
+
+.msg {
+    margin:10px 0;
+    padding:10px 12px;
+    border-radius:8px;
+    white-space:pre-wrap;
+    line-height:1.4;
+}
+
+.user {
+    background:#2563eb;
+    align-self:flex-end;
+}
+
+.bot {
+    background:#374151;
+}
+
+/* INPUT AREA */
+.input-area {
+    display:flex;
+    gap:10px;
+}
+
+input {
+    flex:1;
+    padding:12px;
+    border-radius:6px;
+    border:none;
+    outline:none;
+}
+
+button {
+    padding:12px 14px;
+    border:none;
+    border-radius:6px;
+    cursor:pointer;
+    background:#22c55e;
+    color:white;
+    font-weight:bold;
+}
+
+button:hover {
+    background:#16a34a;
+}
+
+/* SESSION ITEMS */
+.session {
+    background:#1f2937;
+    padding:8px;
+    margin:6px 0;
+    border-radius:6px;
+    cursor:pointer;
+    font-size:14px;
+}
+
+.session:hover {
+    background:#374151;
+}
+
+/* TOP BAR */
+.topbar {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:10px;
+}
+
+.small-btn {
+    background:#ef4444;
+    margin-left:10px;
+}
+
+.small-btn:hover {
+    background:#dc2626;
+}
+
+</style>
 </head>
+
 <body>
 
+<!-- SIDEBAR -->
 <div class="sidebar">
-<h3>Sessions</h3>
-<button onclick="newSession()">+ New</button>
-<div id="sessions"></div>
+    <h3>Sessions</h3>
+    <button onclick="newSession()">+ New Issue</button>
+    <div id="sessionList"></div>
 </div>
 
+<!-- MAIN -->
 <div class="main">
-<h2>Helpdesk Copilot</h2>
 
-<div id="chat" class="chat"></div>
+    <div class="topbar">
+        <h2>AI Helpdesk Copilot V7</h2>
+        <button class="small-btn" onclick="resetChat()">Reset Chat</button>
+    </div>
 
-<input id="input" placeholder="Describe issue...">
-<button onclick="send()">Send</button>
+    <div id="chat" class="chat"></div>
+
+    <div class="input-area">
+        <input id="input" placeholder="Describe your issue..." />
+        <button onclick="sendMessage()">Send</button>
+    </div>
 
 </div>
 
 <script>
 
 const chat = document.getElementById("chat");
+const input = document.getElementById("input");
+const sessionList = document.getElementById("sessionList");
 
-function add(text, cls){
-    const d = document.createElement("div");
-    d.className = "msg " + cls;
-    d.textContent = text;
-    chat.appendChild(d);
+// ----------------------------
+// ADD MESSAGE
+// ----------------------------
+function addMessage(text, type){
+    const div = document.createElement("div");
+    div.className = "msg " + type;
+    div.textContent = text;
+
+    chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
 }
 
-async function send(){
+// ----------------------------
+// SEND MESSAGE (SAFE)
+// ----------------------------
+async function sendMessage(){
+
     const msg = input.value.trim();
     if(!msg) return;
 
-    add(msg,"user");
+    addMessage(msg, "user");
     input.value = "";
 
-    try{
-        const res = await fetch("/ask",{
-            method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({message:msg})
+    try {
+        const res = await fetch("/ask", {
+            method: "POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({ message: msg })
         });
 
         const data = await res.json();
 
-        add(data.response,"bot");
-        renderSessions(data.sessions);
+        if(!res.ok){
+            addMessage("⚠ Server error: " + (data.response || "unknown"), "bot");
+            return;
+        }
 
-    }catch(e){
-        add("⚠ Server error","bot");
-        console.error(e);
+        if(data.response){
+            addMessage(data.response, "bot");
+        } else {
+            addMessage("⚠ No response received", "bot");
+        }
+
+    } catch (err) {
+        console.error(err);
+        addMessage("⚠ Network error connecting to server", "bot");
     }
 }
 
-async function renderSessions(sessions){
-    const box = document.getElementById("sessions");
-    box.innerHTML = "";
-
-    sessions.forEach(s=>{
-        const div = document.createElement("div");
-        div.className="session";
-        div.textContent = s.name || "Issue";
-
-        div.onclick = async ()=>{
-            await fetch("/switch_session",{
-                method:"POST",
-                headers:{"Content-Type":"application/json"},
-                body:JSON.stringify({sid:s.id})
-            });
-
-            loadChat(s.messages);
-        };
-
-        box.appendChild(div);
-    });
-}
-
-function loadChat(messages){
-    chat.innerHTML="";
-    messages.forEach(m=>{
-        add(m.text, m.role);
-    });
-}
-
-async function newSession(){
-    const res = await fetch("/new_session",{method:"POST"});
-    const data = await res.json();
-    renderSessions([data]);
-    chat.innerHTML="";
-}
-
-// ENTER KEY FIX
-input.addEventListener("keydown", e=>{
-    if(e.key==="Enter") send();
+// ----------------------------
+// ENTER KEY SUPPORT
+// ----------------------------
+input.addEventListener("keydown", function(e){
+    if(e.key === "Enter"){
+        e.preventDefault();
+        sendMessage();
+    }
 });
+
+// ----------------------------
+// RESET CHAT
+// ----------------------------
+async function resetChat(){
+    await fetch("/reset", {method:"POST"});
+    chat.innerHTML = "";
+    addMessage("New session started. Describe your issue.", "bot");
+}
+
+// ----------------------------
+// NEW SESSION (UI ONLY FOR NOW)
+// ----------------------------
+function newSession(){
+    chat.innerHTML = "";
+    addMessage("New issue started.", "bot");
+}
+
+// ----------------------------
+// SESSION LIST (placeholder safe)
+// ----------------------------
+function loadSessions(){
+    sessionList.innerHTML = "";
+
+    // placeholder until backend session expansion
+    const item = document.createElement("div");
+    item.className = "session";
+    item.textContent = "Current Session";
+    item.onclick = resetChat;
+
+    sessionList.appendChild(item);
+}
+
+loadSessions();
 
 </script>
 
