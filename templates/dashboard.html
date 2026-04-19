@@ -1,138 +1,247 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<title>Helpdesk v13 Stable</title>
-
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Helpdesk v15 Dashboard</title>
 <style>
-body {
-    margin:0;
-    font-family: Arial;
-    background:#0b1220;
-    color:white;
-    display:flex;
-    height:100vh;
-}
+    body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+        height: 100vh;
+        display: flex;
+    }
 
-.main {
-    flex:1;
-    display:flex;
-    flex-direction:column;
-    padding:15px;
-}
+    /* Sidebar */
+    .sidebar {
+        width: 240px;
+        background: #111827;
+        padding: 15px;
+        border-right: 1px solid #1f2937;
+        display: flex;
+        flex-direction: column;
+    }
 
-.chat {
-    flex:1;
-    background:#1f2937;
-    padding:15px;
-    border-radius:10px;
-    overflow-y:auto;
-    display:flex;
-    flex-direction:column;
-}
+    .sidebar h2 {
+        font-size: 16px;
+        margin-bottom: 10px;
+    }
 
-.msg {
-    display:inline-block;
-    max-width:65%;
-    width:fit-content;
-    padding:10px;
-    border-radius:10px;
-    margin:6px 0;
-    white-space:pre-wrap;
-}
+    .session-list {
+        flex: 1;
+        overflow-y: auto;
+    }
 
-.user { background:#2563eb; align-self:flex-end; }
-.bot { background:#374151; align-self:flex-start; }
+    .session-item {
+        padding: 8px;
+        margin-bottom: 5px;
+        background: #1f2937;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+    }
 
-.input {
-    display:flex;
-    gap:10px;
-    margin-top:10px;
-}
+    .session-item:hover {
+        background: #374151;
+    }
 
-input {
-    flex:1;
-    padding:10px;
-}
+    /* Main chat area */
+    .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+    }
 
-button {
-    padding:10px;
-    background:#22c55e;
-    color:white;
-    border:none;
-}
+    .topbar {
+        padding: 10px;
+        background: #111827;
+        border-bottom: 1px solid #1f2937;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .chat {
+        flex: 1;
+        padding: 15px;
+        overflow-y: auto;
+    }
+
+    .msg {
+        max-width: 70%;
+        padding: 10px;
+        margin: 8px 0;
+        border-radius: 10px;
+        white-space: pre-wrap;
+    }
+
+    .user {
+        background: #2563eb;
+        margin-left: auto;
+    }
+
+    .bot {
+        background: #1f2937;
+    }
+
+    .input-bar {
+        display: flex;
+        padding: 10px;
+        border-top: 1px solid #1f2937;
+        background: #111827;
+    }
+
+    input {
+        flex: 1;
+        padding: 10px;
+        border-radius: 6px;
+        border: none;
+        outline: none;
+        background: #1f2937;
+        color: white;
+    }
+
+    button {
+        margin-left: 10px;
+        padding: 10px 15px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        background: #2563eb;
+        color: white;
+    }
+
+    /* Right panel */
+    .rightpanel {
+        width: 260px;
+        background: #111827;
+        border-left: 1px solid #1f2937;
+        padding: 15px;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .card {
+        background: #1f2937;
+        padding: 10px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        font-size: 13px;
+    }
+
+    .small {
+        font-size: 12px;
+        opacity: 0.8;
+    }
 </style>
 </head>
-
 <body>
 
-<div class="main">
-
-<h3>Helpdesk v13 Stable</h3>
-
-<div id="chat" class="chat"></div>
-
-<div class="input">
-    <input id="input">
-    <button onclick="send()">Send</button>
+<div class="sidebar">
+    <h2>Sessions</h2>
+    <div class="session-list" id="sessions"></div>
 </div>
 
+<div class="main">
+    <div class="topbar">
+        <div>AI Helpdesk v15</div>
+        <button onclick="resetChat()">Reset</button>
+    </div>
+
+    <div class="chat" id="chat"></div>
+
+    <div class="input-bar">
+        <input id="input" placeholder="Describe the issue..." />
+        <button onclick="send()">Send</button>
+    </div>
+</div>
+
+<div class="rightpanel">
+    <div class="card">
+        <b>Status</b>
+        <div class="small" id="status">Idle</div>
+    </div>
+
+    <div class="card">
+        <b>Last Response Time</b>
+        <div class="small" id="time">-</div>
+    </div>
+
+    <div class="card">
+        <b>Session Notes</b>
+        <div class="small">AI will build diagnostic context here.</div>
+    </div>
 </div>
 
 <script>
+let sessions = [];
+let messages = [];
 
-const chat = document.getElementById("chat");
-const input = document.getElementById("input");
+function renderChat() {
+    const chat = document.getElementById("chat");
+    chat.innerHTML = "";
 
-function add(text,type){
-    const d=document.createElement("div");
-    d.className="msg "+type;
-    d.textContent=text;
-    chat.appendChild(d);
-    chat.scrollTop=chat.scrollHeight;
+    messages.forEach(m => {
+        const div = document.createElement("div");
+        div.className = "msg " + (m.role === "user" ? "user" : "bot");
+        div.textContent = m.content;
+        chat.appendChild(div);
+    });
+
+    chat.scrollTop = chat.scrollHeight;
 }
 
-async function send(){
+function updateSessions() {
+    const el = document.getElementById("sessions");
+    el.innerHTML = "";
 
-    const msg = input.value.trim();
-    if(!msg) return;
-
-    add(msg,"user");
-    input.value="";
-
-    try {
-
-        const res = await fetch("/ask",{
-            method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({message:msg})
-        });
-
-        const data = await res.json();
-
-        // SAFE GUARDS (CRITICAL)
-        if(!data || !data.response){
-            add("⚠ No response received","bot");
-            return;
-        }
-
-        add(data.response,"bot");
-
-        console.log("DEBUG:", data.debug);
-
-    } catch (e) {
-        add("⚠ Network error","bot");
-    }
+    sessions.forEach((s, i) => {
+        const div = document.createElement("div");
+        div.className = "session-item";
+        div.textContent = "Session " + (i + 1);
+        el.appendChild(div);
+    });
 }
 
-input.addEventListener("keydown",(e)=>{
-    if(e.key==="Enter"){
-        e.preventDefault();
-        send();
-    }
-});
+async function send() {
+    const input = document.getElementById("input");
+    const text = input.value;
+    if (!text) return;
 
-add("System ready (v13 stable).","bot");
+    messages.push({ role: "user", content: text });
+    renderChat();
 
+    input.value = "";
+    document.getElementById("status").innerText = "Analyzing...";
+
+    const start = Date.now();
+
+    const res = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text })
+    });
+
+    const data = await res.json();
+
+    const duration = ((Date.now() - start) / 1000).toFixed(2);
+    document.getElementById("time").innerText = duration + "s";
+
+    messages.push({ role: "assistant", content: data.response });
+    renderChat();
+
+    document.getElementById("status").innerText = "Idle";
+}
+
+async function resetChat() {
+    await fetch("/reset", { method: "POST" });
+    messages = [];
+    renderChat();
+}
+
+updateSessions();
 </script>
 
 </body>
