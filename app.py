@@ -6,7 +6,7 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 
 # ----------------------------
-# GLOBAL STORE
+# MEMORY
 # ----------------------------
 users = {}
 
@@ -18,123 +18,151 @@ def get_user():
 
     if uid not in users:
         users[uid] = {
-            "sessions": {},
-            "current_session": None
+            "step": 0,
+            "last_question": None,
+            "resolved": False
         }
 
     return users[uid]
 
-def create_session(user):
-    sid = str(uuid.uuid4())
+# ----------------------------
+# INTENT DETECTION
+# ----------------------------
+def detect_answer(msg):
+    msg = msg.lower()
 
-    user["sessions"][sid] = {
-        "id": sid,
-        "name": "New Issue",
-        "step": 0,
-        "messages": []
-    }
+    if any(x in msg for x in ["yes","y","yeah","yep"]):
+        return "yes"
 
-    user["current_session"] = sid
-    return user["sessions"][sid]
+    if any(x in msg for x in ["no","n","nope","still"]):
+        return "no"
 
-def get_current_session(user):
-    sid = user["current_session"]
+    if any(x in msg for x in ["works","fixed","good","resolved"]):
+        return "fixed"
 
-    if not sid or sid not in user["sessions"]:
-        return create_session(user)
-
-    return user["sessions"][sid]
+    return "unknown"
 
 # ----------------------------
-# HELPERS
+# ENGINE
 # ----------------------------
-def yes(msg):
-    return msg in ["y","yes","yeah","yep","fixed","works","working","ok","good"]
+def troubleshoot(state, msg):
 
-def no(msg):
-    return msg in ["n","no","nope","still","not"]
+    answer = detect_answer(msg)
 
-# ----------------------------
-# CHAT ENGINE
-# ----------------------------
-def process(session_data, msg):
+    # ---------------- STEP 0
+    if state["step"] == 0:
+        state["step"] = 1
+        state["last_question"] = "restart"
 
-    step = session_data["step"]
+        return "Step 1:\nRestart your computer.\n\nDid that fix the issue?"
 
-    def add(role, text):
-        session_data["messages"].append({"role": role, "text": text})
-        return text
+    # ---------------- STEP 1 (Restart)
+    if state["step"] == 1:
 
-    # STEP 0
-    if step == 0:
-        session_data["step"] = 1
-        return add("bot",
-            "Step 1: Restart your computer\n\nDid that fix the issue?"
+        if answer in ["yes","fixed"]:
+            state["resolved"] = True
+            return "Great — restarting fixed it 👍"
+
+        state["step"] = 2
+        state["last_question"] = "all_apps"
+
+        return (
+            "Step 2:\n"
+            "Is this happening to ALL apps or just one?\n\n"
+            "Reply: 'all' or 'one'"
         )
 
-    # STEP 1
-    if step == 1:
-        if yes(msg):
-            return add("bot", "Great — fixed 👍")
+    # ---------------- STEP 2 (Scope)
+    if state["step"] == 2:
 
-        session_data["step"] = 2
-        return add("bot",
-            "Step 2: Check wireless interference\n\nIs it still happening?"
-        )
+        if "all" in msg:
+            state["step"] = 3
+            state["last_question"] = "task_manager"
 
-    # STEP 2
-    if step == 2:
-        if yes(msg):
-            session_data["step"] = 3
-            return add("bot",
-                "Step 3: Try a different USB port\n\nDid that fix it?"
+            return (
+                "Step 3:\n"
+                "Check system usage.\n\n"
+                "Press Ctrl + Shift + Esc\n"
+                "Look at CPU and Memory.\n\n"
+                "Tell me the percentages."
             )
 
-        return add("bot", "Good — issue resolved 👍")
+        if "one" in msg:
+            state["resolved"] = True
+            return "This is likely an app-specific issue. Reinstall that app."
 
-    # STEP 3
-    if step == 3:
-        if yes(msg):
-            return add("bot", "Great — fixed 👍")
+        return "Is it ALL apps or just ONE?"
 
-        session_data["step"] = 4
-        return add("bot",
-            "Step 4: Update keyboard driver\n\nDid that fix it?"
-        )
+    # ---------------- STEP 3 (Usage)
+    if state["step"] == 3:
 
-    # STEP 4
-    if step == 4:
-        if yes(msg):
-            return add("bot", "Driver update fixed it 👍")
+        if "%" in msg:
+            state["step"] = 4
+            state["last_question"] = "high_usage"
 
-        session_data["step"] = 5
-        return add("bot",
-            "Step 5: Test keyboard on another computer\n\nWhat happened?"
-        )
-
-    # STEP 5
-    if step == 5:
-        if "work" in msg:
-            session_data["step"] = 6
-            return add("bot",
-                "Hardware is good. Issue is your PC.\n\nDo you want help fixing it?"
+            return (
+                "Step 4:\n"
+                "Sort processes by Memory usage.\n\n"
+                "Tell me the top process using memory."
             )
 
-        if no(msg):
-            return add("bot", "Keyboard likely faulty — replace it.")
+        return "Tell me CPU % and Memory % (example: CPU 80%, Memory 95%)"
 
-        return add("bot", "Did it work on another computer?")
+    # ---------------- STEP 4 (Process)
+    if state["step"] == 4:
 
-    # STEP 6
-    if step == 6:
-        if yes(msg):
-            return add("bot",
-                "Step: Reset USB power settings\n\nTry again after restart."
+        if len(msg) > 2:
+            state["step"] = 5
+            state["last_question"] = "safe_kill"
+
+            return (
+                "Step 5:\n"
+                "That process may be causing the issue.\n\n"
+                "Right-click it → End Task (only if not system process)\n\n"
+                "Did that fix the issue?"
             )
 
-        return add("bot", "Okay — start a new issue anytime 👍")
+        return "Tell me the process name."
 
-    return add("bot", "Tell me more.")
+    # ---------------- STEP 5 (Kill)
+    if state["step"] == 5:
+
+        if answer in ["yes","fixed"]:
+            state["resolved"] = True
+            return "Perfect — that process was the problem 👍"
+
+        state["step"] = 6
+        state["last_question"] = "safe_mode"
+
+        return (
+            "Step 6:\n"
+            "Restart into Safe Mode.\n\n"
+            "Does the issue still happen there?"
+        )
+
+    # ---------------- STEP 6 (Safe Mode)
+    if state["step"] == 6:
+
+        if answer == "no":
+            state["resolved"] = True
+            return (
+                "Good — that means a startup program is causing it.\n\n"
+                "Disable startup apps."
+            )
+
+        if answer == "yes":
+            state["step"] = 7
+            return (
+                "Step 7:\n"
+                "Run System File Checker:\n\n"
+                "Open Command Prompt as admin\n"
+                "Run: sfc /scannow\n\n"
+                "Tell me what it says."
+            )
+
+        return "Does it still happen in Safe Mode? (yes/no)"
+
+    return "Tell me more about the issue."
 
 # ----------------------------
 # ROUTES
@@ -146,47 +174,16 @@ def home():
 @app.route("/ask", methods=["POST"])
 def ask():
     try:
-        data = request.get_json()
-        msg = (data.get("message") or "").lower().strip()
+        msg = (request.json.get("message") or "").strip()
 
         user = get_user()
-        session_data = get_current_session(user)
+        reply = troubleshoot(user, msg)
 
-        # save user msg
-        session_data["messages"].append({"role":"user","text":msg})
-
-        reply = process(session_data, msg)
-
-        return jsonify({
-            "response": reply,
-            "sessions": list(user["sessions"].values()),
-            "current": session_data["id"]
-        })
+        return jsonify({"response": reply})
 
     except Exception as e:
         print("ERROR:", e)
-        return jsonify({"response":"⚠ Server error"}), 500
-
-@app.route("/sessions")
-def sessions_route():
-    user = get_user()
-    return jsonify(list(user["sessions"].values()))
-
-@app.route("/switch_session", methods=["POST"])
-def switch_session():
-    user = get_user()
-    sid = request.json.get("sid")
-
-    if sid in user["sessions"]:
-        user["current_session"] = sid
-
-    return jsonify({"status":"ok"})
-
-@app.route("/new_session", methods=["POST"])
-def new_session():
-    user = get_user()
-    s = create_session(user)
-    return jsonify(s)
+        return jsonify({"response": "⚠ Server error"}), 500
 
 @app.route("/health")
 def health():
