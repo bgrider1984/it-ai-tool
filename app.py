@@ -1,219 +1,136 @@
+from flask import Flask, render_template, request, jsonify, session
+from openai import OpenAI
 import os
 import uuid
-from flask import Flask, request, jsonify, session, render_template
+import time
 
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "dev")
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-key-change-me")
 
-# =========================
-# MEMORY STORE (TEMP)
-# =========================
-db = {}
+# ----------------------------
+# OpenAI Client
+# ----------------------------
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-def get_user():
-    if "uid" not in session:
-        session["uid"] = str(uuid.uuid4())
+MODEL = "gpt-4.1-mini"  # stable + fast + cheap fallback model
 
-    uid = session["uid"]
+# ----------------------------
+# System Prompt (Helpdesk Brain)
+# ----------------------------
+SYSTEM_PROMPT = """
+You are Adaptive Reasoning Helpdesk v15.
 
-    if uid not in db:
-        db[uid] = {"sessions": {}, "current": None}
+Your job:
+- Diagnose technical issues step-by-step
+- Ask ONE question at a time when needed
+- Never repeat the same troubleshooting step twice
+- If user already tried something, acknowledge it and move forward
+- Escalate logically if issue persists
+- Keep responses short, actionable, and structured
 
-    return db[uid]
+Rules:
+1. Do NOT loop or repeat suggestions
+2. If uncertain, narrow down with a diagnostic question
+3. Prefer step-by-step elimination
+4. If hardware/software ambiguity exists, separate both paths
+5. If stuck after 3 attempts, provide a fallback diagnostic checklist
+"""
+
+# ----------------------------
+# Simple Session Memory
+# ----------------------------
+def get_session_id():
+    if "sid" not in session:
+        session["sid"] = str(uuid.uuid4())
+    return session["sid"]
+
+# In-memory conversation store (swap for DB later if needed)
+CHAT_MEMORY = {}
+
+MAX_HISTORY = 12
+
+# ----------------------------
+# Core AI Call
+# ----------------------------
+def ask_ai(messages):
+    try:
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            temperature=0.4,
+        )
+        return response.choices[0].message.content
+
+    except Exception as e:
+        return f"⚠️ AI error occurred: {str(e)}"
 
 
-def new_session(user):
-    sid = str(uuid.uuid4())
-
-    user["sessions"][sid] = {
-        "id": sid,
-        "title": "New Issue",
-        "messages": [],
-        "state": {
-            "route": None,
-            "history_signals": []
-        }
-    }
-
-    user["current"] = sid
-    return user["sessions"][sid]
+# ----------------------------
+# Route: Home
+# ----------------------------
+@app.route("/")
+def index():
+    return render_template("index.html")
 
 
-def get_session(user):
-    sid = user["current"]
-    if not sid or sid not in user["sessions"]:
-        return new_session(user)
-    return user["sessions"][sid]
+# ----------------------------
+# Route: Chat API
+# ----------------------------
+@app.route("/chat", methods=["POST"])
+def chat():
+    sid = get_session_id()
 
-# =========================
-# ISSUE DETECTION
-# =========================
-def classify(msg):
-    m = msg.lower()
+    user_input = request.json.get("message", "").strip()
+    if not user_input:
+        return jsonify({"response": "Please enter a message."})
 
-    if any(x in m for x in ["wifi","internet","router","dns"]):
-        return "network"
+    # init memory
+    if sid not in CHAT_MEMORY:
+        CHAT_MEMORY[sid] = []
 
-    if any(x in m for x in ["app","crash","error","not working","software"]):
-        return "software"
+    history = CHAT_MEMORY[sid]
 
-    if any(x in m for x in ["mouse","keyboard","usb","battery","hardware"]):
-        return "hardware"
+    # Build messages
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    return "unknown"
+    # Add memory (trimmed)
+    for msg in history[-MAX_HISTORY:]:
+        messages.append(msg)
 
-# =========================
-# SMART SIGNAL DETECTOR
-# =========================
-def detect_signal(msg):
+    # Add new user message
+    messages.append({"role": "user", "content": user_input})
 
-    m = msg.lower()
+    # Call AI
+    start = time.time()
+    reply = ask_ai(messages)
+    duration = round(time.time() - start, 2)
 
-    signals = []
+    # Save memory
+    history.append({"role": "user", "content": user_input})
+    history.append({"role": "assistant", "content": reply})
 
-    if any(x in m for x in ["no","still","same","not working","yep","y"]):
-        signals.append("persistent_issue")
-
-    if any(x in m for x in ["ok","fixed","works","done","yes"]):
-        signals.append("resolved_signal")
-
-    if any(x in m for x in ["what","huh","confused","repeat"]):
-        signals.append("confusion")
-
-    return signals
-
-# =========================
-# ADAPTIVE REASONING CORE
-# =========================
-def reason(route, session_state, msg):
-
-    signals = detect_signal(msg)
-    history = session_state["history_signals"]
-
-    # store signals
-    history.extend(signals)
-
-    # ------------------------
-    # ESCALATION / LOOP BREAK
-    # ------------------------
-    if history.count("persistent_issue") >= 2:
-        return {
-            "text": "⚠ It looks like basic troubleshooting is not resolving this.\nThis may require advanced diagnostics or hardware inspection.",
-            "done": True
-        }
-
-    # ------------------------
-    # NETWORK
-    # ------------------------
-    if route == "network":
-
-        if "resolved_signal" in signals:
-            return {"text":"✔ Network issue appears resolved.","done":True}
-
-        if "persistent_issue" in signals:
-            return {
-                "text":"Next step: test another device on same network.\nThis helps isolate router vs ISP issues.",
-                "done": False
-            }
-
-        return {
-            "text":"🌐 Step: Restart your router.\nDid that improve the connection?",
-            "done": False
-        }
-
-    # ------------------------
-    # SOFTWARE
-    # ------------------------
-    if route == "software":
-
-        if "resolved_signal" in signals:
-            return {"text":"✔ Software issue appears resolved.","done":True}
-
-        if "persistent_issue" in signals:
-            return {
-                "text":"Next step: clear application cache or reinstall.\nLet me know if it still fails.",
-                "done": False
-            }
-
-        return {
-            "text":"🔵 Step: Restart the application.\nDid that fix the issue?",
-            "done": False
-        }
-
-    # ------------------------
-    # HARDWARE
-    # ------------------------
-    if route == "hardware":
-
-        if "resolved_signal" in signals:
-            return {"text":"✔ Hardware issue appears resolved.","done":True}
-
-        if "persistent_issue" in signals:
-            return {
-                "text":"Next step: test device on another computer.\nThis isolates hardware vs system issue.",
-                "done": False
-            }
-
-        return {
-            "text":"🟢 Step: Check power or batteries.\nIs the issue still happening?",
-            "done": False
-        }
-
-    # ------------------------
-    # UNKNOWN
-    # ------------------------
-    return {
-        "text":"I need more details to diagnose the issue properly.",
-        "done": True
-    }
-
-# =========================
-# API
-# =========================
-@app.route("/ask", methods=["POST"])
-def ask():
-
-    msg = request.json.get("message","")
-
-    user = get_user()
-    session_data = get_session(user)
-
-    # store input
-    session_data["messages"].append({"role":"user","text":msg})
-
-    if not session_data["state"]["route"]:
-        session_data["state"]["route"] = classify(msg)
-
-    route = session_data["state"]["route"]
-
-    result = reason(route, session_data["state"], msg)
-
-    session_data["messages"].append({
-        "role":"bot",
-        "text":result["text"]
-    })
+    CHAT_MEMORY[sid] = history[-MAX_HISTORY:]
 
     return jsonify({
-        "response": result["text"],
-        "sessions": list(user["sessions"].values())
+        "response": reply,
+        "debug": {
+            "response_time_sec": duration
+        }
     })
 
 
-@app.route("/new", methods=["POST"])
-def new():
-    user = get_user()
-    return jsonify(new_session(user))
+# ----------------------------
+# Route: Reset Session
+# ----------------------------
+@app.route("/reset", methods=["POST"])
+def reset():
+    sid = get_session_id()
+    CHAT_MEMORY[sid] = []
+    return jsonify({"status": "reset complete"})
 
 
-@app.route("/health")
-def health():
-    return jsonify({"status":"ok","version":"v15-adaptive-reasoning"})
-
-
-@app.route("/")
-def home():
-    return render_template("dashboard.html")
-
-# =========================
+# ----------------------------
+# Run App
+# ----------------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(debug=True)
