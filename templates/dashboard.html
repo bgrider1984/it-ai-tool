@@ -8,16 +8,17 @@
     body {
         margin: 0;
         font-family: Arial, sans-serif;
-        background: #0f172a;
+        background: #0b1220;
         color: #e2e8f0;
         height: 100vh;
         display: flex;
+        overflow: hidden;
     }
 
     /* Sidebar */
     .sidebar {
         width: 240px;
-        background: #111827;
+        background: #0f172a;
         padding: 15px;
         border-right: 1px solid #1f2937;
         display: flex;
@@ -25,8 +26,9 @@
     }
 
     .sidebar h2 {
-        font-size: 16px;
+        font-size: 14px;
         margin-bottom: 10px;
+        opacity: 0.9;
     }
 
     .session-list {
@@ -36,18 +38,18 @@
 
     .session-item {
         padding: 8px;
-        margin-bottom: 5px;
+        margin-bottom: 6px;
         background: #1f2937;
         border-radius: 6px;
         cursor: pointer;
-        font-size: 13px;
+        font-size: 12px;
     }
 
     .session-item:hover {
-        background: #374151;
+        background: #334155;
     }
 
-    /* Main chat area */
+    /* Main */
     .main {
         flex: 1;
         display: flex;
@@ -56,7 +58,7 @@
 
     .topbar {
         padding: 10px;
-        background: #111827;
+        background: #0f172a;
         border-bottom: 1px solid #1f2937;
         display: flex;
         justify-content: space-between;
@@ -67,14 +69,17 @@
         flex: 1;
         padding: 15px;
         overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
     }
 
     .msg {
         max-width: 70%;
         padding: 10px;
-        margin: 8px 0;
         border-radius: 10px;
         white-space: pre-wrap;
+        font-size: 13px;
     }
 
     .user {
@@ -86,11 +91,12 @@
         background: #1f2937;
     }
 
+    /* Input bar now clearly under replies */
     .input-bar {
         display: flex;
         padding: 10px;
         border-top: 1px solid #1f2937;
-        background: #111827;
+        background: #0f172a;
     }
 
     input {
@@ -115,25 +121,33 @@
 
     /* Right panel */
     .rightpanel {
-        width: 260px;
-        background: #111827;
+        width: 280px;
+        background: #0f172a;
         border-left: 1px solid #1f2937;
         padding: 15px;
         display: flex;
         flex-direction: column;
+        gap: 10px;
     }
 
     .card {
         background: #1f2937;
         padding: 10px;
         border-radius: 8px;
-        margin-bottom: 10px;
-        font-size: 13px;
+        font-size: 12px;
     }
 
-    .small {
+    .quick-btn {
+        background: #334155;
+        padding: 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        margin-top: 6px;
         font-size: 12px;
-        opacity: 0.8;
+    }
+
+    .quick-btn:hover {
+        background: #475569;
     }
 </style>
 </head>
@@ -141,7 +155,9 @@
 
 <div class="sidebar">
     <h2>Sessions</h2>
-    <div class="session-list" id="sessions"></div>
+    <div class="session-list" id="sessions">
+        <div class="session-item">Active Session</div>
+    </div>
 </div>
 
 <div class="main">
@@ -161,22 +177,21 @@
 <div class="rightpanel">
     <div class="card">
         <b>Status</b>
-        <div class="small" id="status">Idle</div>
+        <div id="status">Idle</div>
     </div>
 
     <div class="card">
-        <b>Last Response Time</b>
-        <div class="small" id="time">-</div>
+        <b>Response Time</b>
+        <div id="time">-</div>
     </div>
 
     <div class="card">
-        <b>Session Notes</b>
-        <div class="small">AI will build diagnostic context here.</div>
+        <b>Quick Fix Actions</b>
+        <div id="fixes">No actions yet</div>
     </div>
 </div>
 
 <script>
-let sessions = [];
 let messages = [];
 
 function renderChat() {
@@ -193,27 +208,42 @@ function renderChat() {
     chat.scrollTop = chat.scrollHeight;
 }
 
-function updateSessions() {
-    const el = document.getElementById("sessions");
-    el.innerHTML = "";
+function extractFixes(text) {
+    const fixes = [];
+    const lines = text.split("\n");
 
-    sessions.forEach((s, i) => {
-        const div = document.createElement("div");
-        div.className = "session-item";
-        div.textContent = "Session " + (i + 1);
-        el.appendChild(div);
+    lines.forEach(l => {
+        if (l.toLowerCase().includes("fix:")) {
+            fixes.push(l.replace(/fix:/i, "").trim());
+        }
+    });
+
+    const fixBox = document.getElementById("fixes");
+    fixBox.innerHTML = fixes.length ? "" : "No actions yet";
+
+    fixes.forEach(f => {
+        const btn = document.createElement("div");
+        btn.className = "quick-btn";
+        btn.textContent = f;
+        btn.onclick = () => {
+            document.getElementById("input").value = f;
+            document.getElementById("input").focus();
+        };
+        fixBox.appendChild(btn);
     });
 }
 
 async function send() {
     const input = document.getElementById("input");
-    const text = input.value;
+    const text = input.value.trim();
     if (!text) return;
 
     messages.push({ role: "user", content: text });
     renderChat();
 
     input.value = "";
+    input.focus();
+
     document.getElementById("status").innerText = "Analyzing...";
 
     const start = Date.now();
@@ -232,6 +262,8 @@ async function send() {
     messages.push({ role: "assistant", content: data.response });
     renderChat();
 
+    extractFixes(data.response);
+
     document.getElementById("status").innerText = "Idle";
 }
 
@@ -239,9 +271,8 @@ async function resetChat() {
     await fetch("/reset", { method: "POST" });
     messages = [];
     renderChat();
+    document.getElementById("fixes").innerHTML = "No actions yet";
 }
-
-updateSessions();
 </script>
 
 </body>
