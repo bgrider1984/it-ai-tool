@@ -13,6 +13,7 @@ body {
     color: #e2e8f0;
     height: 100vh;
     display: flex;
+    overflow: hidden;
 }
 
 /* SIDEBAR */
@@ -37,10 +38,9 @@ body {
     border-radius: 6px;
     margin-bottom: 6px;
     font-size: 12px;
-    cursor: pointer;
 }
 
-/* MAIN */
+/* MAIN AREA */
 .main {
     flex: 1;
     display: flex;
@@ -74,7 +74,7 @@ body {
     background: #1f2937;
 }
 
-/* INPUT */
+/* INPUT BAR */
 .inputbar {
     display: flex;
     padding: 10px;
@@ -127,6 +127,7 @@ button {
     border-radius: 6px;
     cursor: pointer;
 }
+
 .fixbtn:hover {
     background: #475569;
 }
@@ -150,6 +151,7 @@ button {
         <input id="input" placeholder="Describe the issue..." />
         <button onclick="send()">Send</button>
     </div>
+
 </div>
 
 <!-- RIGHT PANEL -->
@@ -190,6 +192,7 @@ function render() {
 
 function extractFixes(text) {
     const fixes = [];
+
     text.split("\n").forEach(line => {
         if (line.toLowerCase().includes("fix:")) {
             fixes.push(line.replace(/fix:/i, "").trim());
@@ -203,10 +206,12 @@ function extractFixes(text) {
         const b = document.createElement("div");
         b.className = "fixbtn";
         b.innerText = f;
+
         b.onclick = () => {
             document.getElementById("input").value = f;
             document.getElementById("input").focus();
         };
+
         box.appendChild(b);
     });
 }
@@ -216,7 +221,7 @@ async function send() {
     const text = input.value.trim();
     if (!text) return;
 
-    messages.push({role:"user", content:text});
+    messages.push({ role: "user", content: text });
     render();
 
     input.value = "";
@@ -227,17 +232,17 @@ async function send() {
     const start = Date.now();
 
     const res = await fetch("/chat", {
-        method:"POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({message:text})
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text })
     });
 
     const data = await res.json();
 
-    const time = ((Date.now() - start)/1000).toFixed(2);
+    const time = ((Date.now() - start) / 1000).toFixed(2);
     document.getElementById("time").innerText = time + "s";
 
-    messages.push({role:"assistant", content:data.response});
+    messages.push({ role: "assistant", content: data.response });
     render();
 
     extractFixes(data.response);
