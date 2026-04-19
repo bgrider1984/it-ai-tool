@@ -1,219 +1,93 @@
-<!DOCTYPE html>
-<html>
-<head>
-<title>Helpdesk Copilot v10 (Stable UI Fix)</title>
-
-<style>
-body {
-    margin:0;
-    font-family: Arial;
-    background:#0b1220;
-    color:white;
-    display:flex;
-    height:100vh;
-}
-
-/* SIDEBAR */
-.sidebar {
-    width:260px;
-    background:#111827;
-    padding:10px;
-    overflow-y:auto;
-}
-
-/* SESSION ITEMS */
-.session {
-    background:#1f2937;
-    padding:8px;
-    margin:6px 0;
-    border-radius:6px;
-    cursor:pointer;
-}
-
-/* MAIN */
-.main {
-    flex:1;
-    display:flex;
-    flex-direction:column;
-    padding:15px;
-}
-
-/* CHAT WINDOW */
-.chat {
-    flex:1;
-    background:#1f2937;
-    padding:15px;
-    border-radius:10px;
-    overflow-y:auto;
-
-    /* CRITICAL FIX */
-    display:flex;
-    flex-direction:column;
-}
-
-/* 🔥 FIXED CHAT BUBBLES */
-.msg {
-    display:inline-block;          /* prevents full width stretch */
-    max-width:65%;                /* key fix */
-    width:fit-content;            /* key fix */
-    padding:10px 12px;
-    border-radius:10px;
-    margin:6px 0;
-    white-space:pre-wrap;
-    word-wrap:break-word;
-}
-
-/* ALIGNMENT FIX */
-.user {
-    background:#2563eb;
-    align-self:flex-end;
-}
-
-.bot {
-    background:#374151;
-    align-self:flex-start;
-}
-
-/* INPUT */
-.input-area {
-    display:flex;
-    gap:10px;
-    margin-top:10px;
-}
-
-input {
-    flex:1;
-    padding:10px;
-    border-radius:6px;
-    border:none;
-}
-
-button {
-    padding:10px;
-    background:#22c55e;
-    border:none;
-    color:white;
-    cursor:pointer;
-}
-
-/* TOP BAR */
-.top {
-    display:flex;
-    justify-content:space-between;
-    margin-bottom:10px;
-}
-
-</style>
-</head>
-
-<body>
-
-<div class="sidebar">
-    <button onclick="newSession()">+ New</button>
-    <div id="sessions"></div>
-</div>
-
-<div class="main">
-
-<div class="top">
-    <h3>Helpdesk v10 UI Fix</h3>
-</div>
-
-<div id="chat" class="chat"></div>
-
-<div class="input-area">
-    <input id="input">
-    <button onclick="send()">Send</button>
-</div>
-
-</div>
-
 <script>
 
-const chat = document.getElementById("chat");
+document.addEventListener("DOMContentLoaded", () => {
 
-// ----------------------------
-// MESSAGE RENDER
-// ----------------------------
-function add(text,type){
-    const div=document.createElement("div");
-    div.className="msg "+type;
-    div.textContent=text;
-    chat.appendChild(div);
-    chat.scrollTop=chat.scrollHeight;
-}
+    const chat = document.getElementById("chat");
+    const input = document.getElementById("input");
 
-// ----------------------------
-// SEND
-// ----------------------------
-async function send(){
+    if (!chat || !input) {
+        console.error("Missing chat or input element");
+        return;
+    }
 
-    const msg=input.value.trim();
-    if(!msg) return;
+    // ----------------------------
+    // ADD MESSAGE
+    // ----------------------------
+    function add(text, type) {
+        const div = document.createElement("div");
+        div.className = "msg " + type;
+        div.textContent = text;
 
-    add(msg,"user");
-    input.value="";
+        chat.appendChild(div);
+        chat.scrollTop = chat.scrollHeight;
+    }
 
-    const res=await fetch("/ask",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({message:msg})
+    // ----------------------------
+    // SEND MESSAGE
+    // ----------------------------
+    async function send() {
+
+        const msg = input.value.trim();
+        if (!msg) return;
+
+        add(msg, "user");
+        input.value = "";
+
+        try {
+            const res = await fetch("/ask", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: msg })
+            });
+
+            const data = await res.json();
+
+            add(data.response || "No response", "bot");
+
+            if (data.sessions) {
+                loadSessions(data.sessions);
+            }
+
+        } catch (err) {
+            console.error(err);
+            add("⚠ Server connection error", "bot");
+        }
+    }
+
+    // ----------------------------
+    // ENTER KEY FIX (ROBUST)
+    // ----------------------------
+    input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            send();
+        }
     });
 
-    const data=await res.json();
+    // ----------------------------
+    // OPTIONAL: BUTTON HOOK (SAFE)
+    // ----------------------------
+    window.send = send;
 
-    add(data.response,"bot");
+    // ----------------------------
+    // LOAD SESSIONS (SAFE)
+    // ----------------------------
+    function loadSessions(sessions) {
+        const box = document.getElementById("sessions");
+        if (!box || !sessions) return;
 
-    loadSessions(data.sessions);
-}
+        box.innerHTML = "";
 
-// ----------------------------
-// LOAD SESSIONS (FIXED)
-// ----------------------------
-function loadSessions(sessions){
+        sessions.forEach(s => {
+            const d = document.createElement("div");
+            d.className = "session";
+            d.textContent = s.title || "Session";
+            box.appendChild(d);
+        });
+    }
 
-    const box=document.getElementById("sessions");
-    box.innerHTML="";
+    // expose if needed
+    window.loadSessions = loadSessions;
 
-    if(!sessions) return;
-
-    sessions.forEach(s=>{
-
-        const d=document.createElement("div");
-        d.className="session";
-        d.textContent=s.title || "Session";
-
-        d.onclick=()=>{
-            loadChat(s.messages);
-        };
-
-        box.appendChild(d);
-    });
-}
-
-// ----------------------------
-// RESTORE CHAT HISTORY (CRITICAL FIX)
-// ----------------------------
-function loadChat(messages){
-
-    chat.innerHTML="";
-
-    if(!messages) return;
-
-    messages.forEach(m=>{
-        add(m.text,m.role==="user"?"user":"bot");
-    });
-}
-
-// ----------------------------
-// NEW SESSION
-// ----------------------------
-async function newSession(){
-    await fetch("/new",{method:"POST"});
-    location.reload();
-}
-
+});
 </script>
-
-</body>
-</html>
