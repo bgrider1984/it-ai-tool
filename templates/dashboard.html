@@ -1,12 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Helpdesk Recovery UI</title>
+
+<style>
+body {
+    margin:0;
+    font-family: Arial;
+    background:#0b1220;
+    color:white;
+    display:flex;
+    height:100vh;
+}
+
+/* SIDEBAR */
+.sidebar {
+    width:240px;
+    background:#111827;
+    padding:10px;
+    overflow-y:auto;
+}
+
+/* CHAT AREA */
+.main {
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    padding:15px;
+}
+
+.chat {
+    flex:1;
+    background:#1f2937;
+    padding:15px;
+    border-radius:10px;
+    overflow-y:auto;
+
+    display:flex;
+    flex-direction:column;
+}
+
+/* CHAT BUBBLES (SAFE + FIXED WIDTH) */
+.msg {
+    display:inline-block;
+    max-width:65%;
+    width:fit-content;
+    padding:10px 12px;
+    border-radius:10px;
+    margin:6px 0;
+    white-space:pre-wrap;
+    word-wrap:break-word;
+}
+
+.user {
+    background:#2563eb;
+    align-self:flex-end;
+}
+
+.bot {
+    background:#374151;
+    align-self:flex-start;
+}
+
+/* INPUT */
+.input-area {
+    display:flex;
+    gap:10px;
+    margin-top:10px;
+}
+
+input {
+    flex:1;
+    padding:10px;
+    border:none;
+    border-radius:6px;
+    outline:none;
+}
+
+button {
+    padding:10px 14px;
+    border:none;
+    border-radius:6px;
+    background:#22c55e;
+    color:white;
+    cursor:pointer;
+}
+
+/* SESSION LIST */
+.session {
+    background:#1f2937;
+    padding:8px;
+    margin:6px 0;
+    border-radius:6px;
+    cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<div class="sidebar">
+    <h3>Sessions</h3>
+    <div id="sessions"></div>
+</div>
+
+<div class="main">
+
+    <h3>Helpdesk Copilot (Recovery Mode)</h3>
+
+    <div id="chat" class="chat"></div>
+
+    <div class="input-area">
+        <input id="input" placeholder="Type your issue..." />
+        <button id="sendBtn">Send</button>
+    </div>
+
+</div>
+
 <script>
+(function () {
 
-document.addEventListener("DOMContentLoaded", () => {
-
+    // ----------------------------
+    // SAFE INIT (PREVENT WHITE SCREEN)
+    // ----------------------------
     const chat = document.getElementById("chat");
     const input = document.getElementById("input");
+    const sendBtn = document.getElementById("sendBtn");
+    const sessionsBox = document.getElementById("sessions");
 
-    if (!chat || !input) {
-        console.error("Missing chat or input element");
+    if (!chat || !input || !sendBtn) {
+        console.error("Missing critical DOM elements");
+        document.body.innerHTML = "<h2 style='color:white;padding:20px'>UI failed to load (missing elements)</h2>";
         return;
     }
 
@@ -42,21 +166,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
             const data = await res.json();
 
-            add(data.response || "No response", "bot");
-
-            if (data.sessions) {
-                loadSessions(data.sessions);
-            }
+            add(data.response || "No response from server", "bot");
 
         } catch (err) {
             console.error(err);
-            add("⚠ Server connection error", "bot");
+            add("⚠ Server error or connection issue", "bot");
         }
     }
 
     // ----------------------------
-    // ENTER KEY FIX (ROBUST)
+    // EVENT HANDLERS (ROBUST)
     // ----------------------------
+
+    sendBtn.addEventListener("click", send);
+
     input.addEventListener("keydown", function (e) {
         if (e.key === "Enter") {
             e.preventDefault();
@@ -65,29 +188,12 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // ----------------------------
-    // OPTIONAL: BUTTON HOOK (SAFE)
+    // INITIAL MESSAGE
     // ----------------------------
-    window.send = send;
+    add("System ready. Describe your issue to begin.", "bot");
 
-    // ----------------------------
-    // LOAD SESSIONS (SAFE)
-    // ----------------------------
-    function loadSessions(sessions) {
-        const box = document.getElementById("sessions");
-        if (!box || !sessions) return;
-
-        box.innerHTML = "";
-
-        sessions.forEach(s => {
-            const d = document.createElement("div");
-            d.className = "session";
-            d.textContent = s.title || "Session";
-            box.appendChild(d);
-        });
-    }
-
-    // expose if needed
-    window.loadSessions = loadSessions;
-
-});
+})();
 </script>
+
+</body>
+</html>
