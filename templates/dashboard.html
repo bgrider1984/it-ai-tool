@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Helpdesk Recovery UI</title>
+<title>Helpdesk v13 Stable</title>
 
 <style>
 body {
@@ -13,15 +13,6 @@ body {
     height:100vh;
 }
 
-/* SIDEBAR */
-.sidebar {
-    width:240px;
-    background:#111827;
-    padding:10px;
-    overflow-y:auto;
-}
-
-/* CHAT AREA */
 .main {
     flex:1;
     display:flex;
@@ -35,35 +26,24 @@ body {
     padding:15px;
     border-radius:10px;
     overflow-y:auto;
-
     display:flex;
     flex-direction:column;
 }
 
-/* CHAT BUBBLES (SAFE + FIXED WIDTH) */
 .msg {
     display:inline-block;
     max-width:65%;
     width:fit-content;
-    padding:10px 12px;
+    padding:10px;
     border-radius:10px;
     margin:6px 0;
     white-space:pre-wrap;
-    word-wrap:break-word;
 }
 
-.user {
-    background:#2563eb;
-    align-self:flex-end;
-}
+.user { background:#2563eb; align-self:flex-end; }
+.bot { background:#374151; align-self:flex-start; }
 
-.bot {
-    background:#374151;
-    align-self:flex-start;
-}
-
-/* INPUT */
-.input-area {
+.input {
     display:flex;
     gap:10px;
     margin-top:10px;
@@ -72,127 +52,87 @@ body {
 input {
     flex:1;
     padding:10px;
-    border:none;
-    border-radius:6px;
-    outline:none;
 }
 
 button {
-    padding:10px 14px;
-    border:none;
-    border-radius:6px;
+    padding:10px;
     background:#22c55e;
     color:white;
-    cursor:pointer;
-}
-
-/* SESSION LIST */
-.session {
-    background:#1f2937;
-    padding:8px;
-    margin:6px 0;
-    border-radius:6px;
-    cursor:pointer;
+    border:none;
 }
 </style>
 </head>
 
 <body>
 
-<div class="sidebar">
-    <h3>Sessions</h3>
-    <div id="sessions"></div>
-</div>
-
 <div class="main">
 
-    <h3>Helpdesk Copilot (Recovery Mode)</h3>
+<h3>Helpdesk v13 Stable</h3>
 
-    <div id="chat" class="chat"></div>
+<div id="chat" class="chat"></div>
 
-    <div class="input-area">
-        <input id="input" placeholder="Type your issue..." />
-        <button id="sendBtn">Send</button>
-    </div>
+<div class="input">
+    <input id="input">
+    <button onclick="send()">Send</button>
+</div>
 
 </div>
 
 <script>
-(function () {
 
-    // ----------------------------
-    // SAFE INIT (PREVENT WHITE SCREEN)
-    // ----------------------------
-    const chat = document.getElementById("chat");
-    const input = document.getElementById("input");
-    const sendBtn = document.getElementById("sendBtn");
-    const sessionsBox = document.getElementById("sessions");
+const chat = document.getElementById("chat");
+const input = document.getElementById("input");
 
-    if (!chat || !input || !sendBtn) {
-        console.error("Missing critical DOM elements");
-        document.body.innerHTML = "<h2 style='color:white;padding:20px'>UI failed to load (missing elements)</h2>";
-        return;
-    }
+function add(text,type){
+    const d=document.createElement("div");
+    d.className="msg "+type;
+    d.textContent=text;
+    chat.appendChild(d);
+    chat.scrollTop=chat.scrollHeight;
+}
 
-    // ----------------------------
-    // ADD MESSAGE
-    // ----------------------------
-    function add(text, type) {
-        const div = document.createElement("div");
-        div.className = "msg " + type;
-        div.textContent = text;
+async function send(){
 
-        chat.appendChild(div);
-        chat.scrollTop = chat.scrollHeight;
-    }
+    const msg = input.value.trim();
+    if(!msg) return;
 
-    // ----------------------------
-    // SEND MESSAGE
-    // ----------------------------
-    async function send() {
+    add(msg,"user");
+    input.value="";
 
-        const msg = input.value.trim();
-        if (!msg) return;
+    try {
 
-        add(msg, "user");
-        input.value = "";
+        const res = await fetch("/ask",{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({message:msg})
+        });
 
-        try {
-            const res = await fetch("/ask", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: msg })
-            });
+        const data = await res.json();
 
-            const data = await res.json();
-
-            add(data.response || "No response from server", "bot");
-
-        } catch (err) {
-            console.error(err);
-            add("⚠ Server error or connection issue", "bot");
+        // SAFE GUARDS (CRITICAL)
+        if(!data || !data.response){
+            add("⚠ No response received","bot");
+            return;
         }
+
+        add(data.response,"bot");
+
+        console.log("DEBUG:", data.debug);
+
+    } catch (e) {
+        add("⚠ Network error","bot");
     }
+}
 
-    // ----------------------------
-    // EVENT HANDLERS (ROBUST)
-    // ----------------------------
+input.addEventListener("keydown",(e)=>{
+    if(e.key==="Enter"){
+        e.preventDefault();
+        send();
+    }
+});
 
-    sendBtn.addEventListener("click", send);
+add("System ready (v13 stable).","bot");
 
-    input.addEventListener("keydown", function (e) {
-        if (e.key === "Enter") {
-            e.preventDefault();
-            send();
-        }
-    });
-
-    // ----------------------------
-    // INITIAL MESSAGE
-    // ----------------------------
-    add("System ready. Describe your issue to begin.", "bot");
-
-})();
 </script>
 
 </body>
