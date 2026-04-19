@@ -9,7 +9,7 @@ app.secret_key = os.getenv("SECRET_KEY", "dev-secret")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ----------------------------
-# MEMORY
+# SESSION MEMORY
 # ----------------------------
 users = {}
 
@@ -27,61 +27,68 @@ def get_user():
     return users[uid]
 
 # ----------------------------
-# SYSTEM PROMPT (THE BRAIN)
+# SMART SYSTEM PROMPT (V8 BRAIN)
 # ----------------------------
 SYSTEM_PROMPT = """
-You are an expert IT Helpdesk Copilot.
+You are Smart Helpdesk Copilot v8.
 
-Your job is to guide a junior technician step-by-step through troubleshooting.
+You are an IT Tier-1 + Tier-2 troubleshooting assistant.
 
-RULES:
-- Always start simple (restart, power, connections)
-- Ask ONE clear question at a time
-- If multiple questions are needed, list them clearly
-- Always explain HOW to perform each step
-- Never jump to advanced solutions too early
-- Never repeat the same question unless reworded
-- Adapt based on user answers
-- If the issue is resolved, acknowledge it and stop
-- If not resolved, ALWAYS provide the next step
-- Never leave the user without a question or next action
+You MUST:
 
-STYLE:
-- Clear
-- Structured
-- Practical
-- Like a real helpdesk technician
+1. Identify issue type:
+   - hardware
+   - software
+   - network
+   - unknown
 
-FORMAT:
+2. Provide:
+   - Likely cause (top 1–3)
+   - Step-by-step fix (simple → advanced)
+   - ONE question at a time
 
-Step X:
-What to do:
-• step instructions
+3. Always include:
+   - Next best action
+   - Simple instructions first (KISS principle)
+   - No repetition of same question twice
 
-Why:
-• explanation
+4. Output format:
 
-Then ask:
-A direct question to continue troubleshooting
+---
+🧠 Diagnosis:
+- Category:
+- Likely cause:
+
+🟢 Quick Fix:
+- (1–3 immediate actions user can try)
+
+🔧 Step:
+- Clear instruction
+
+❓ Question:
+- One direct follow-up question
+
+---
+
+5. NEVER end without a question or next step.
 """
 
 # ----------------------------
 # AI ENGINE
 # ----------------------------
-def ai_response(history, user_msg):
+def generate_response(history, msg):
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    # include history (last 10 messages)
-    for m in history[-10:]:
+    for m in history[-12:]:
         messages.append(m)
 
-    messages.append({"role": "user", "content": user_msg})
+    messages.append({"role": "user", "content": msg})
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,
-        temperature=0.3
+        temperature=0.4
     )
 
     return response.choices[0].message.content
@@ -96,37 +103,44 @@ def home():
 @app.route("/ask", methods=["POST"])
 def ask():
     try:
-        msg = request.json.get("message")
+        msg = request.json.get("message", "").strip()
 
         user = get_user()
 
-        # store user message
         user["history"].append({"role": "user", "content": msg})
 
-        reply = ai_response(user["history"], msg)
+        reply = generate_response(user["history"], msg)
 
-        # store AI reply
         user["history"].append({"role": "assistant", "content": reply})
 
-        return jsonify({"response": reply})
+        return jsonify({
+            "response": reply,
+            "quick_actions": [
+                "Restart device",
+                "Check cables",
+                "Restart router",
+                "Check Task Manager",
+                "Update drivers"
+            ]
+        })
 
     except Exception as e:
         print("ERROR:", e)
         return jsonify({
-            "response": "⚠ AI error. Check API key or logs."
+            "response": "⚠ System error occurred. Please try again."
         }), 500
 
 @app.route("/reset", methods=["POST"])
 def reset():
     user = get_user()
     user["history"] = []
-    return jsonify({"status":"reset"})
+    return jsonify({"status": "reset"})
 
 @app.route("/health")
 def health():
     return jsonify({
         "status": "ok",
-        "openai": bool(os.getenv("OPENAI_API_KEY"))
+        "model": "v8-smart-helpdesk"
     })
 
 # ----------------------------
