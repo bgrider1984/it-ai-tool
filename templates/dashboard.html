@@ -40,14 +40,14 @@ body {
     font-size: 12px;
 }
 
-/* MAIN AREA */
+/* MAIN */
 .main {
     flex: 1;
     display: flex;
     flex-direction: column;
 }
 
-/* CHAT AREA */
+/* CHAT */
 .chat {
     flex: 1;
     padding: 15px;
@@ -74,7 +74,7 @@ body {
     background: #1f2937;
 }
 
-/* INPUT BAR */
+/* INPUT */
 .inputbar {
     display: flex;
     padding: 10px;
@@ -208,8 +208,9 @@ function extractFixes(text) {
         b.innerText = f;
 
         b.onclick = () => {
-            document.getElementById("input").value = f;
-            document.getElementById("input").focus();
+            const input = document.getElementById("input");
+            input.value = f;
+            input.focus();
         };
 
         box.appendChild(b);
@@ -249,6 +250,14 @@ async function send() {
 
     document.getElementById("status").innerText = "Idle";
 }
+
+/* ENTER KEY SUPPORT */
+document.getElementById("input").addEventListener("keydown", function(event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        send();
+    }
+});
 
 </script>
 
