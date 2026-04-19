@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Helpdesk Intelligence v9</title>
+<title>Helpdesk Copilot v10 (Stable UI Fix)</title>
 
 <style>
 body {
@@ -18,14 +18,16 @@ body {
     width:260px;
     background:#111827;
     padding:10px;
+    overflow-y:auto;
 }
 
+/* SESSION ITEMS */
 .session {
     background:#1f2937;
     padding:8px;
     margin:6px 0;
-    cursor:pointer;
     border-radius:6px;
+    cursor:pointer;
 }
 
 /* MAIN */
@@ -36,21 +38,24 @@ body {
     padding:15px;
 }
 
-/* CHAT */
+/* CHAT WINDOW */
 .chat {
     flex:1;
     background:#1f2937;
     padding:15px;
     border-radius:10px;
     overflow-y:auto;
+
+    /* CRITICAL FIX */
     display:flex;
     flex-direction:column;
 }
 
-/* FIXED BUBBLES (IMPORTANT) */
+/* 🔥 FIXED CHAT BUBBLES */
 .msg {
-    display:inline-block;
-    max-width:70%;
+    display:inline-block;          /* prevents full width stretch */
+    max-width:65%;                /* key fix */
+    width:fit-content;            /* key fix */
     padding:10px 12px;
     border-radius:10px;
     margin:6px 0;
@@ -58,6 +63,7 @@ body {
     word-wrap:break-word;
 }
 
+/* ALIGNMENT FIX */
 .user {
     background:#2563eb;
     align-self:flex-end;
@@ -78,6 +84,8 @@ body {
 input {
     flex:1;
     padding:10px;
+    border-radius:6px;
+    border:none;
 }
 
 button {
@@ -88,12 +96,13 @@ button {
     cursor:pointer;
 }
 
-/* TOP */
+/* TOP BAR */
 .top {
     display:flex;
     justify-content:space-between;
     margin-bottom:10px;
 }
+
 </style>
 </head>
 
@@ -107,7 +116,7 @@ button {
 <div class="main">
 
 <div class="top">
-    <h3>Helpdesk v9 Routing</h3>
+    <h3>Helpdesk v10 UI Fix</h3>
 </div>
 
 <div id="chat" class="chat"></div>
@@ -123,54 +132,82 @@ button {
 
 const chat = document.getElementById("chat");
 
-function add(text, type){
-    const div = document.createElement("div");
-    div.className = "msg " + type;
-    div.textContent = text;
+// ----------------------------
+// MESSAGE RENDER
+// ----------------------------
+function add(text,type){
+    const div=document.createElement("div");
+    div.className="msg "+type;
+    div.textContent=text;
     chat.appendChild(div);
-    chat.scrollTop = chat.scrollHeight;
+    chat.scrollTop=chat.scrollHeight;
 }
 
+// ----------------------------
+// SEND
+// ----------------------------
 async function send(){
 
-    const msg = input.value.trim();
+    const msg=input.value.trim();
     if(!msg) return;
 
     add(msg,"user");
     input.value="";
 
-    const res = await fetch("/ask",{
+    const res=await fetch("/ask",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({message:msg})
     });
 
-    const data = await res.json();
+    const data=await res.json();
 
     add(data.response,"bot");
-    renderSessions(data.sessions);
+
+    loadSessions(data.sessions);
 }
 
-function renderSessions(sessions){
-    const box = document.getElementById("sessions");
+// ----------------------------
+// LOAD SESSIONS (FIXED)
+// ----------------------------
+function loadSessions(sessions){
+
+    const box=document.getElementById("sessions");
     box.innerHTML="";
 
+    if(!sessions) return;
+
     sessions.forEach(s=>{
+
         const d=document.createElement("div");
         d.className="session";
-        d.textContent=s.title;
-        d.onclick=()=>load(s);
+        d.textContent=s.title || "Session";
+
+        d.onclick=()=>{
+            loadChat(s.messages);
+        };
+
         box.appendChild(d);
     });
 }
 
-function load(s){
+// ----------------------------
+// RESTORE CHAT HISTORY (CRITICAL FIX)
+// ----------------------------
+function loadChat(messages){
+
     chat.innerHTML="";
-    s.messages.forEach(m=>{
-        add(m.text,m.role);
+
+    if(!messages) return;
+
+    messages.forEach(m=>{
+        add(m.text,m.role==="user"?"user":"bot");
     });
 }
 
+// ----------------------------
+// NEW SESSION
+// ----------------------------
 async function newSession(){
     await fetch("/new",{method:"POST"});
     location.reload();
