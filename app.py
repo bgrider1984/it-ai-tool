@@ -1,39 +1,58 @@
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from openai import OpenAI
-import os
-import uuid
+import os, uuid
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")
+app.secret_key = "dev-secret"
 
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
 MODEL = "gpt-4.1-mini"
 
 CHAT_MEMORY = {}
 CASE_MEMORY = {}
-MAX_HISTORY = 12
+SESSION_STORE = {}
 
-DIAG_PROMPT = """
-You are an IT troubleshooting assistant.
-Ask ONE question at a time. Do not repeat questions.
-"""
+# ---------------- AUTH ----------------
+@app.route("/", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username")
+        session["user"] = username
+        return redirect("/dashboard")
+    return render_template("login.html")
 
-FIX_PROMPT = """
-You are in FIX MODE.
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/")
 
-DO NOT ask questions.
-ONLY provide solutions.
-
-Each solution must start with:
-Fix:
-"""
-
+# ---------------- SESSION ----------------
 def get_sid():
     if "sid" not in session:
-        session["sid"] = str(uuid.uuid4())
+        sid = str(uuid.uuid4())
+        session["sid"] = sid
+        SESSION_STORE[sid] = []
     return session["sid"]
 
+# ---------------- MEMORY ----------------
+def update_case_memory(sid, text):
+    if sid not in CASE_MEMORY:
+        CASE_MEMORY[sid] = {"facts": {}}
+
+    f = CASE_MEMORY[sid]["facts"]
+    t = text.lower()
+
+    if "usb" in t: f["connection"] = "USB"
+    if "wifi" in t: f["connection"] = "WiFi"
+    if "windows 11" in t: f["os"] = "Windows 11"
+    if "ready" in t: f["printer"] = "Ready"
+    if "recognized" in t: f["recognized"] = "Yes"
+    if "print" in t and "not" in t: f["issue"] = "Print failure"
+
+def fix_mode(facts):
+    return len(facts) >= 4
+
+# ---------------- AI ----------------
 def ask_ai(messages):
     res = client.chat.completions.create(
         model=MODEL,
@@ -42,88 +61,62 @@ def ask_ai(messages):
     )
     return res.choices[0].message.content
 
-def update_case_memory(sid, text):
-    if sid not in CASE_MEMORY:
-        CASE_MEMORY[sid] = {"facts": {}}
-
-    facts = CASE_MEMORY[sid]["facts"]
-    t = text.lower()
-
-    if "usb" in t:
-        facts["connection"] = "USB"
-
-    if "wifi" in t:
-        facts["connection"] = "WiFi"
-
-    if "windows 11" in t:
-        facts["os"] = "Windows 11"
-
-    if "ready" in t:
-        facts["printer"] = "Ready"
-
-    if "recognized" in t or "shows up" in t:
-        facts["recognized"] = "Yes"
-
-    if "doesn't print" in t or "not printing" in t:
-        facts["issue"] = "Print failure"
-
-    CASE_MEMORY[sid]["facts"] = facts
-
-def should_use_fix_mode(facts):
-    score = len(facts)
-    return score >= 4
-
-@app.route("/")
-def index():
-    return render_template("index.html")
-
+# ---------------- ROUTES ----------------
 @app.route("/dashboard")
 def dashboard():
+    if "user" not in session:
+        return redirect("/")
     return render_template("dashboard.html")
 
 @app.route("/chat", methods=["POST"])
 def chat():
     sid = get_sid()
-    user_input = request.json.get("message", "")
+    text = request.json.get("message")
 
-    update_case_memory(sid, user_input)
-    facts = CASE_MEMORY[sid]["facts"]
+    update_case_memory(sid, text)
+    facts = CASE_MEMORY.get(sid, {}).get("facts", {})
 
     if sid not in CHAT_MEMORY:
         CHAT_MEMORY[sid] = []
 
     history = CHAT_MEMORY[sid]
 
-    fix_mode = should_use_fix_mode(facts)
-    system_prompt = FIX_PROMPT if fix_mode else DIAG_PROMPT
+    mode = fix_mode(facts)
 
-    messages = [{"role": "system", "content": system_prompt}]
-    messages.append({"role": "system", "content": f"KNOWN FACTS: {facts}"})
+    system = """
+    FIX MODE: Only give solutions. Each must start with Fix:
+    """ if mode else """
+    Ask one question. Do not repeat.
+    """
 
-    for m in history[-MAX_HISTORY:]:
+    messages = [{"role":"system","content":system}]
+    messages.append({"role":"system","content":f"FACTS: {facts}"})
+
+    for m in history[-10:]:
         messages.append(m)
 
-    messages.append({"role": "user", "content": user_input})
+    messages.append({"role":"user","content":text})
 
     reply = ask_ai(messages)
 
-    history.append({"role": "user", "content": user_input})
-    history.append({"role": "assistant", "content": reply})
+    history.append({"role":"user","content":text})
+    history.append({"role":"assistant","content":reply})
 
-    CHAT_MEMORY[sid] = history[-MAX_HISTORY:]
+    SESSION_STORE[sid] = history
 
     return jsonify({
         "response": reply,
         "facts": facts,
-        "fix_mode": fix_mode
+        "fix_mode": mode,
+        "sessions": list(SESSION_STORE.keys())
     })
 
-@app.route("/reset", methods=["POST"])
-def reset():
-    sid = get_sid()
-    CHAT_MEMORY[sid] = []
-    CASE_MEMORY[sid] = {}
-    return jsonify({"status": "reset"})
+@app.route("/load_session", methods=["POST"])
+def load_session():
+    sid = request.json.get("sid")
+    data = SESSION_STORE.get(sid, [])
+    return jsonify(data)
 
+# ---------------- RUN ----------------
 if __name__ == "__main__":
     app.run(debug=True)
