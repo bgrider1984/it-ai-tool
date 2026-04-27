@@ -1,6 +1,6 @@
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect
 from openai import OpenAI
-import os, uuid
+import os, uuid, subprocess, platform
 
 app = Flask(__name__)
 app.secret_key = "dev-secret"
@@ -8,16 +8,22 @@ app.secret_key = "dev-secret"
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 MODEL = "gpt-4.1-mini"
 
+# ---------------- DATA ----------------
+USERS = {}
 CHAT_MEMORY = {}
 CASE_MEMORY = {}
 SESSION_STORE = {}
+ANALYTICS = {
+    "issues": {},
+    "fixes_run": 0
+}
 
 # ---------------- AUTH ----------------
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET","POST"])
 def login():
     if request.method == "POST":
-        username = request.form.get("username")
-        session["user"] = username
+        user = request.form.get("username")
+        session["user"] = user
         return redirect("/dashboard")
     return render_template("login.html")
 
@@ -28,10 +34,14 @@ def logout():
 
 # ---------------- SESSION ----------------
 def get_sid():
+    user = session.get("user","guest")
+
     if "sid" not in session:
         sid = str(uuid.uuid4())
         session["sid"] = sid
         SESSION_STORE[sid] = []
+        USERS.setdefault(user, []).append(sid)
+
     return session["sid"]
 
 # ---------------- MEMORY ----------------
@@ -47,10 +57,30 @@ def update_case_memory(sid, text):
     if "windows 11" in t: f["os"] = "Windows 11"
     if "ready" in t: f["printer"] = "Ready"
     if "recognized" in t: f["recognized"] = "Yes"
-    if "print" in t and "not" in t: f["issue"] = "Print failure"
+    if "not print" in t or "doesn't print" in t:
+        f["issue"] = "Print failure"
+        ANALYTICS["issues"]["print_failure"] = ANALYTICS["issues"].get("print_failure",0)+1
 
+# ---------------- FIX MODE ----------------
 def fix_mode(facts):
     return len(facts) >= 4
+
+# ---------------- SAFE COMMANDS ----------------
+def run_fix_command(fix):
+    if platform.system() != "Windows":
+        return "Fix execution only supported on Windows"
+
+    try:
+        if "spooler" in fix.lower():
+            subprocess.run(["net","stop","spooler"], shell=True)
+            subprocess.run(["net","start","spooler"], shell=True)
+            ANALYTICS["fixes_run"] += 1
+            return "Print Spooler restarted"
+
+        return "No automation mapped for this fix yet"
+
+    except Exception as e:
+        return str(e)
 
 # ---------------- AI ----------------
 def ask_ai(messages):
@@ -74,7 +104,7 @@ def chat():
     text = request.json.get("message")
 
     update_case_memory(sid, text)
-    facts = CASE_MEMORY.get(sid, {}).get("facts", {})
+    facts = CASE_MEMORY[sid]["facts"]
 
     if sid not in CHAT_MEMORY:
         CHAT_MEMORY[sid] = []
@@ -83,11 +113,7 @@ def chat():
 
     mode = fix_mode(facts)
 
-    system = """
-    FIX MODE: Only give solutions. Each must start with Fix:
-    """ if mode else """
-    Ask one question. Do not repeat.
-    """
+    system = "Only give Fix: solutions" if mode else "Ask one question only"
 
     messages = [{"role":"system","content":system}]
     messages.append({"role":"system","content":f"FACTS: {facts}"})
@@ -108,14 +134,20 @@ def chat():
         "response": reply,
         "facts": facts,
         "fix_mode": mode,
-        "sessions": list(SESSION_STORE.keys())
+        "sessions": USERS.get(session["user"],[]),
+        "analytics": ANALYTICS
     })
+
+@app.route("/run_fix", methods=["POST"])
+def run_fix():
+    fix = request.json.get("fix")
+    result = run_fix_command(fix)
+    return jsonify({"result": result})
 
 @app.route("/load_session", methods=["POST"])
 def load_session():
     sid = request.json.get("sid")
-    data = SESSION_STORE.get(sid, [])
-    return jsonify(data)
+    return jsonify(SESSION_STORE.get(sid, []))
 
 # ---------------- RUN ----------------
 if __name__ == "__main__":
