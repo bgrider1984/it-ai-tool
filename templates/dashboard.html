@@ -1,43 +1,231 @@
-<!-- ONLY showing changed parts to stay readable -->
+<!DOCTYPE html>
+<html>
+<head>
+<title>AI Helpdesk</title>
 
-<!-- ADD THIS CARD INSIDE RIGHT PANEL -->
-<div class="card">
-    <b>Analytics</b>
-    <div id="analytics"></div>
+<style>
+body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    background: #0b1220;
+    color: white;
+    font-family: Arial;
+}
+
+/* SIDEBAR */
+.sidebar {
+    width: 200px;
+    background: #0f172a;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* MAIN */
+.main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+/* CHAT */
+.chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.msg {
+    max-width: 65%;
+    padding: 10px;
+    border-radius: 10px;
+}
+
+.user {
+    background: #2563eb;
+    align-self: flex-end;
+}
+
+.bot {
+    background: #1f2937;
+    align-self: flex-start;
+}
+
+/* INPUT */
+.inputbar {
+    display: flex;
+    padding: 10px;
+    border-top: 1px solid #1f2937;
+}
+
+input {
+    flex: 1;
+    padding: 10px;
+    background: #1f2937;
+    color: white;
+    border: none;
+}
+
+button {
+    margin-left: 10px;
+}
+
+/* RIGHT PANEL */
+.right {
+    width: 300px;
+    background: #0f172a;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.card {
+    background: #1f2937;
+    padding: 10px;
+    border-radius: 6px;
+}
+
+/* FIX BUTTON */
+.fixbtn {
+    background: #334155;
+    padding: 6px;
+    margin-top: 5px;
+    cursor: pointer;
+}
+</style>
+</head>
+
+<body>
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+    <b>Sessions</b>
+    <div id="sessions"></div>
+    <button onclick="logout()">Logout</button>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+    <div id="chat" class="chat"></div>
+
+    <div class="inputbar">
+        <input id="input" placeholder="Describe the issue..." />
+        <button onclick="send()">Send</button>
+    </div>
+</div>
+
+<!-- RIGHT PANEL -->
+<div class="right">
+
+    <div class="card">
+        <b>Status</b>
+        <div id="mode">Diagnostic</div>
+    </div>
+
+    <div class="card">
+        <b>Case Facts</b>
+        <div id="facts">None</div>
+    </div>
+
+    <div class="card">
+        <b>Diagnostic Tree</b>
+        <div id="tree"></div>
+    </div>
+
+    <div class="card">
+        <b>Quick Fixes</b>
+        <div id="fixes">None</div>
+    </div>
+
+    <div class="card">
+        <b>Analytics</b>
+        <div id="analytics">None</div>
+    </div>
+
 </div>
 
 <script>
 
-// ADD THIS FUNCTION
-function updateAnalytics(data){
-    let a=document.getElementById("analytics");
-    a.innerHTML="";
+let messages = [];
 
-    a.innerHTML += "Fixes Run: " + data.fixes_run + "<br>";
+/* RENDER CHAT */
+function render() {
+    const chat = document.getElementById("chat");
+    chat.innerHTML = "";
 
-    Object.entries(data.issues).forEach(([k,v])=>{
-        a.innerHTML += k + ": " + v + "<br>";
+    messages.forEach(m => {
+        let div = document.createElement("div");
+        div.className = "msg " + (m.role === "user" ? "user" : "bot");
+        div.innerText = m.content;
+        chat.appendChild(div);
     });
+
+    chat.scrollTop = chat.scrollHeight;
 }
 
-// MODIFY extractFixes
+/* UPDATE UI */
+function updateUI(data) {
+
+    // Status
+    document.getElementById("mode").innerText =
+        data.fix_mode ? "FIX MODE" : "Diagnostic";
+
+    // Facts
+    let f = document.getElementById("facts");
+    f.innerHTML = "";
+    Object.entries(data.facts).forEach(([k,v])=>{
+        let d = document.createElement("div");
+        d.innerText = k + ": " + v;
+        f.appendChild(d);
+    });
+
+    // Sessions
+    let s = document.getElementById("sessions");
+    s.innerHTML = "";
+    data.sessions.forEach(id=>{
+        let d = document.createElement("div");
+        d.innerText = id;
+        d.style.cursor = "pointer";
+        d.onclick = ()=>loadSession(id);
+        s.appendChild(d);
+    });
+
+    // Tree
+    let tree = document.getElementById("tree");
+    tree.innerHTML = "";
+    ["connection","os","printer","recognized","issue"].forEach(k=>{
+        let d = document.createElement("div");
+        d.innerText = (data.facts[k] ? "✔ " : "○ ") + k;
+        tree.appendChild(d);
+    });
+
+    extractFixes(messages[messages.length-1].content);
+    updateAnalytics(data.analytics);
+}
+
+/* FIXES */
 function extractFixes(text){
-    let box=document.getElementById("fixes");
-    box.innerHTML="";
+    let box = document.getElementById("fixes");
+    box.innerHTML = "";
 
     text.split("\n").forEach(l=>{
         if(l.toLowerCase().includes("fix:")){
-            let b=document.createElement("div");
-            b.className="fixbtn";
-            b.innerText=l.replace(/fix:/i,"");
+            let b = document.createElement("div");
+            b.className = "fixbtn";
+            b.innerText = l.replace(/fix:/i,"").trim();
 
-            b.onclick=async ()=>{
-                let res=await fetch("/run_fix",{
+            b.onclick = async ()=>{
+                let res = await fetch("/run_fix",{
                     method:"POST",
                     headers:{"Content-Type":"application/json"},
                     body:JSON.stringify({fix:b.innerText})
                 });
-                let data=await res.json();
+                let data = await res.json();
                 alert(data.result);
             };
 
@@ -46,8 +234,70 @@ function extractFixes(text){
     });
 }
 
-// MODIFY send()
-updateUI(data);
-updateAnalytics(data.analytics);
+/* ANALYTICS */
+function updateAnalytics(data){
+    let a = document.getElementById("analytics");
+    a.innerHTML = "";
+
+    a.innerHTML += "Fixes Run: " + data.fixes_run + "<br>";
+
+    Object.entries(data.issues).forEach(([k,v])=>{
+        a.innerHTML += k + ": " + v + "<br>";
+    });
+}
+
+/* SEND */
+async function send() {
+    let input = document.getElementById("input");
+    let text = input.value.trim();
+    if (!text) return;
+
+    messages.push({role:"user",content:text});
+    render();
+
+    input.value = "";
+
+    let res = await fetch("/chat",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({message:text})
+    });
+
+    let data = await res.json();
+
+    messages.push({role:"assistant",content:data.response});
+    render();
+
+    updateUI(data);
+}
+
+/* LOAD SESSION */
+async function loadSession(id){
+    let res = await fetch("/load_session",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({sid:id})
+    });
+
+    let data = await res.json();
+    messages = data;
+    render();
+}
+
+/* LOGOUT */
+function logout(){
+    window.location.href="/logout";
+}
+
+/* ENTER KEY */
+document.getElementById("input").addEventListener("keydown", e=>{
+    if(e.key==="Enter"){
+        e.preventDefault();
+        send();
+    }
+});
 
 </script>
+
+</body>
+</html>
