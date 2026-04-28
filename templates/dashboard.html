@@ -1,302 +1,175 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>AI Helpdesk</title>
+<meta charset="UTF-8">
+<title>AI Helpdesk v3</title>
 
 <style>
 body {
     margin: 0;
-    height: 100vh;
-    display: flex;
-    background: #0b1220;
-    color: white;
     font-family: Arial;
-}
-
-/* SIDEBAR */
-.sidebar {
-    width: 200px;
     background: #0f172a;
-    padding: 10px;
-    display: flex;
-    flex-direction: column;
+    color: #e2e8f0;
 }
 
-/* MAIN */
-.main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-}
-
-/* CHAT */
-.chat {
-    flex: 1;
-    overflow-y: auto;
+header {
     padding: 15px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    background: #111827;
+    font-weight: bold;
 }
 
-.msg {
-    max-width: 65%;
-    padding: 10px;
-    border-radius: 10px;
+.container {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    height: calc(100vh - 60px);
 }
 
-.user {
-    background: #2563eb;
-    align-self: flex-end;
+.left, .right {
+    padding: 20px;
 }
 
-.bot {
-    background: #1f2937;
-    align-self: flex-start;
+.left {
+    border-right: 1px solid #1f2937;
 }
 
-/* INPUT */
-.inputbar {
-    display: flex;
-    padding: 10px;
-    border-top: 1px solid #1f2937;
-}
-
-input {
-    flex: 1;
-    padding: 10px;
+textarea {
+    width: 100%;
+    height: 120px;
     background: #1f2937;
     color: white;
     border: none;
+    padding: 10px;
+    border-radius: 8px;
 }
 
 button {
-    margin-left: 10px;
-}
-
-/* RIGHT PANEL */
-.right {
-    width: 300px;
-    background: #0f172a;
+    margin-top: 10px;
     padding: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    background: #2563eb;
+    border: none;
+    color: white;
+    cursor: pointer;
+    border-radius: 6px;
 }
 
 .card {
     background: #1f2937;
-    padding: 10px;
-    border-radius: 6px;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-radius: 10px;
 }
 
-/* FIX BUTTON */
-.fixbtn {
-    background: #334155;
-    padding: 6px;
-    margin-top: 5px;
-    cursor: pointer;
+.title {
+    color: #60a5fa;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.item {
+    padding: 5px 0;
+    border-bottom: 1px solid #374151;
+}
+
+.small {
+    font-size: 12px;
+    color: #94a3b8;
 }
 </style>
 </head>
 
 <body>
 
-<!-- SIDEBAR -->
-<div class="sidebar">
-    <b>Sessions</b>
-    <div id="sessions"></div>
-    <button onclick="logout()">Logout</button>
+<header>AI Helpdesk Agent System v3</header>
+
+<div class="container">
+
+<div class="left">
+
+<h3>Issue Input</h3>
+
+<textarea id="input"></textarea>
+
+<button onclick="run()">Analyze</button>
+
+<div class="card">
+<div class="title">AI Analysis</div>
+<div id="analysis"></div>
 </div>
 
-<!-- MAIN -->
-<div class="main">
-    <div id="chat" class="chat"></div>
-
-    <div class="inputbar">
-        <input id="input" placeholder="Describe the issue..." />
-        <button onclick="send()">Send</button>
-    </div>
+<div class="card">
+<div class="title">Follow-up Questions</div>
+<div id="questions"></div>
 </div>
 
-<!-- RIGHT PANEL -->
+</div>
+
 <div class="right">
 
-    <div class="card">
-        <b>Status</b>
-        <div id="mode">Diagnostic</div>
-    </div>
+<div class="card">
+<div class="title">Facts</div>
+<div id="facts"></div>
+</div>
 
-    <div class="card">
-        <b>Case Facts</b>
-        <div id="facts">None</div>
-    </div>
+<div class="card">
+<div class="title">Fixes</div>
+<div id="fixes"></div>
+</div>
 
-    <div class="card">
-        <b>Diagnostic Tree</b>
-        <div id="tree"></div>
-    </div>
+<div class="card">
+<div class="title">Confidence</div>
+<div id="confidence"></div>
+</div>
 
-    <div class="card">
-        <b>Quick Fixes</b>
-        <div id="fixes">None</div>
-    </div>
+<div class="card">
+<div class="title">Category</div>
+<div id="category"></div>
+</div>
 
-    <div class="card">
-        <b>Analytics</b>
-        <div id="analytics">None</div>
-    </div>
+</div>
 
 </div>
 
 <script>
+async function run() {
+    const text = document.getElementById("input").value;
 
-let messages = [];
-
-/* RENDER CHAT */
-function render() {
-    const chat = document.getElementById("chat");
-    chat.innerHTML = "";
-
-    messages.forEach(m => {
-        let div = document.createElement("div");
-        div.className = "msg " + (m.role === "user" ? "user" : "bot");
-        div.innerText = m.content;
-        chat.appendChild(div);
+    const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({text})
     });
 
-    chat.scrollTop = chat.scrollHeight;
-}
+    const data = await res.json();
 
-/* UPDATE UI */
-function updateUI(data) {
+    document.getElementById("analysis").innerText = data.analysis;
 
-    // Status
-    document.getElementById("mode").innerText =
-        data.fix_mode ? "FIX MODE" : "Diagnostic";
+    document.getElementById("category").innerText = data.category;
 
-    // Facts
-    let f = document.getElementById("facts");
-    f.innerHTML = "";
-    Object.entries(data.facts).forEach(([k,v])=>{
-        let d = document.createElement("div");
-        d.innerText = k + ": " + v;
-        f.appendChild(d);
+    document.getElementById("confidence").innerText =
+        (data.confidence * 100).toFixed(1) + "%";
+
+
+    // facts
+    const facts = document.getElementById("facts");
+    facts.innerHTML = "";
+    (data.facts || []).forEach(f => {
+        facts.innerHTML += "<div class='item'>• " + f + "</div>";
     });
 
-    // Sessions
-    let s = document.getElementById("sessions");
-    s.innerHTML = "";
-    data.sessions.forEach(id=>{
-        let d = document.createElement("div");
-        d.innerText = id;
-        d.style.cursor = "pointer";
-        d.onclick = ()=>loadSession(id);
-        s.appendChild(d);
+    // fixes
+    const fixes = document.getElementById("fixes");
+    fixes.innerHTML = "";
+    (data.fixes || []).forEach(f => {
+        fixes.innerHTML += "<div class='item'>→ " + f + "</div>";
     });
 
-    // Tree
-    let tree = document.getElementById("tree");
-    tree.innerHTML = "";
-    ["connection","os","printer","recognized","issue"].forEach(k=>{
-        let d = document.createElement("div");
-        d.innerText = (data.facts[k] ? "✔ " : "○ ") + k;
-        tree.appendChild(d);
-    });
-
-    extractFixes(messages[messages.length-1].content);
-    updateAnalytics(data.analytics);
-}
-
-/* FIXES */
-function extractFixes(text){
-    let box = document.getElementById("fixes");
-    box.innerHTML = "";
-
-    text.split("\n").forEach(l=>{
-        if(l.toLowerCase().includes("fix:")){
-            let b = document.createElement("div");
-            b.className = "fixbtn";
-            b.innerText = l.replace(/fix:/i,"").trim();
-
-            b.onclick = async ()=>{
-                let res = await fetch("/run_fix",{
-                    method:"POST",
-                    headers:{"Content-Type":"application/json"},
-                    body:JSON.stringify({fix:b.innerText})
-                });
-                let data = await res.json();
-                alert(data.result);
-            };
-
-            box.appendChild(b);
-        }
+    // questions
+    const q = document.getElementById("questions");
+    q.innerHTML = "";
+    (data.questions || []).forEach(x => {
+        q.innerHTML += "<div class='item'>? " + x + "</div>";
     });
 }
-
-/* ANALYTICS */
-function updateAnalytics(data){
-    let a = document.getElementById("analytics");
-    a.innerHTML = "";
-
-    a.innerHTML += "Fixes Run: " + data.fixes_run + "<br>";
-
-    Object.entries(data.issues).forEach(([k,v])=>{
-        a.innerHTML += k + ": " + v + "<br>";
-    });
-}
-
-/* SEND */
-async function send() {
-    let input = document.getElementById("input");
-    let text = input.value.trim();
-    if (!text) return;
-
-    messages.push({role:"user",content:text});
-    render();
-
-    input.value = "";
-
-    let res = await fetch("/chat",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({message:text})
-    });
-
-    let data = await res.json();
-
-    messages.push({role:"assistant",content:data.response});
-    render();
-
-    updateUI(data);
-}
-
-/* LOAD SESSION */
-async function loadSession(id){
-    let res = await fetch("/load_session",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({sid:id})
-    });
-
-    let data = await res.json();
-    messages = data;
-    render();
-}
-
-/* LOGOUT */
-function logout(){
-    window.location.href="/logout";
-}
-
-/* ENTER KEY */
-document.getElementById("input").addEventListener("keydown", e=>{
-    if(e.key==="Enter"){
-        e.preventDefault();
-        send();
-    }
-});
-
 </script>
 
 </body>
