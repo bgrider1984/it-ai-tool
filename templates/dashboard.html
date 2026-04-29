@@ -1,150 +1,93 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="UTF-8">
-<title>AI Helpdesk v6</title>
+<title>AI Helpdesk v7</title>
 
 <style>
-body {
-    margin: 0;
-    font-family: Arial;
-    background: #0f172a;
-    color: #e2e8f0;
-}
-
-header {
-    padding: 15px;
-    background: #111827;
-    font-size: 20px;
-    font-weight: bold;
-}
+body { margin:0; font-family:Arial; background:#0f172a; color:#e2e8f0; }
+header { padding:15px; background:#111827; font-weight:bold; }
 
 .container {
-    display: grid;
+    display:grid;
     grid-template-columns: 2fr 1fr;
     height: calc(100vh - 60px);
 }
 
-.left, .right {
-    padding: 20px;
-}
-
-.left {
-    border-right: 1px solid #1f2937;
-}
+.left, .right { padding:20px; }
+.left { border-right:1px solid #1f2937; }
 
 textarea {
-    width: 100%;
-    height: 120px;
-    background: #1f2937;
-    color: white;
-    border: none;
-    padding: 10px;
-    border-radius: 8px;
+    width:100%;
+    height:100px;
+    background:#1f2937;
+    color:white;
+    border:none;
+    padding:10px;
 }
 
-button {
-    margin-top: 10px;
-    padding: 10px;
-    background: #2563eb;
-    border: none;
-    color: white;
-    cursor: pointer;
-    border-radius: 6px;
-    margin-right: 10px;
-}
-
-button.danger {
-    background: #dc2626;
-}
+button { margin-top:10px; padding:10px; background:#2563eb; border:none; color:white; cursor:pointer; }
 
 .card {
-    background: #1f2937;
-    padding: 15px;
-    margin-bottom: 15px;
-    border-radius: 10px;
+    background:#1f2937;
+    padding:15px;
+    margin-bottom:15px;
+    border-radius:10px;
 }
 
-.title {
-    color: #60a5fa;
-    font-weight: bold;
-    margin-bottom: 10px;
-}
-
-.item {
-    padding: 5px 0;
-    border-bottom: 1px solid #374151;
-    white-space: pre-wrap;
-}
-
-.small {
-    font-size: 12px;
-    color: #94a3b8;
-}
+.title { color:#60a5fa; font-weight:bold; margin-bottom:10px; }
+.alert { color:#f87171; }
+.metric { margin-bottom:5px; }
+.item { margin-bottom:5px; }
 </style>
 </head>
 
 <body>
 
-<header>AI Helpdesk v6 — Autonomous Troubleshooting</header>
+<header>AI Helpdesk v7 — Monitoring Enabled</header>
 
 <div class="container">
 
-<!-- LEFT PANEL -->
 <div class="left">
 
-<h3>Describe the Issue</h3>
+<h3>Describe Issue</h3>
+<textarea id="input"></textarea>
 
-<textarea id="input" placeholder="Example: My internet keeps disconnecting..."></textarea>
-
-<br>
-
-<button onclick="run(false)">Analyze</button>
-<button class="danger" onclick="run(true)">Run Auto Fix</button>
+<button onclick="run()">Analyze</button>
+<button onclick="run(true)">Auto Fix</button>
 
 <div class="card">
-<div class="title">AI Analysis</div>
-<div id="analysis">Waiting...</div>
+<div class="title">Analysis</div>
+<div id="analysis"></div>
 </div>
 
 <div class="card">
-<div class="title">Detected Category</div>
-<div id="category">--</div>
-</div>
-
-<div class="card">
-<div class="title">Confidence</div>
-<div id="confidence">--</div>
-</div>
-
-</div>
-
-<!-- RIGHT PANEL -->
-<div class="right">
-
-<div class="card">
-<div class="title">Facts</div>
-<div id="facts"></div>
-</div>
-
-<div class="card">
-<div class="title">Suggested Fixes</div>
+<div class="title">Fixes</div>
 <div id="fixes"></div>
 </div>
 
 <div class="card">
-<div class="title">Tool Output (Diagnostics)</div>
+<div class="title">Timeline</div>
+<div id="timeline"></div>
+</div>
+
+</div>
+
+<div class="right">
+
+<div class="card">
+<div class="title">System Metrics</div>
+<div id="metrics"></div>
+</div>
+
+<div class="card">
+<div class="title">Alerts</div>
+<div id="alerts"></div>
+</div>
+
+<div class="card">
+<div class="title">Tool Output</div>
 <div id="tool"></div>
-</div>
-
-<div class="card">
-<div class="title">Auto Fix Result</div>
-<div id="fix"></div>
-</div>
-
-<div class="card">
-<div class="title">Case Memory (Debug)</div>
-<div id="memory" class="small"></div>
 </div>
 
 </div>
@@ -152,66 +95,73 @@ button.danger {
 </div>
 
 <script>
-async function run(autoFix=false) {
+
+async function run(autoFix=false){
     const text = document.getElementById("input").value;
 
-    document.getElementById("analysis").innerText = "Running...";
-
-    const res = await fetch("/api/run", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-            text: text,
-            auto_fix: autoFix
-        })
+    const res = await fetch("/api/run",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({text, auto_fix:autoFix})
     });
 
     const data = await res.json();
     const r = data.result;
 
-    // ANALYSIS
-    document.getElementById("analysis").innerText = r.analysis || "No analysis";
+    document.getElementById("analysis").innerText = r.analysis;
 
-    // CATEGORY
-    document.getElementById("category").innerText = r.category || "unknown";
-
-    // CONFIDENCE
-    document.getElementById("confidence").innerText =
-        r.confidence ? (r.confidence * 100).toFixed(1) + "%" : "--";
-
-    // FACTS
-    const factsDiv = document.getElementById("facts");
-    factsDiv.innerHTML = "";
-    (r.facts || []).forEach(f => {
-        factsDiv.innerHTML += "<div class='item'>• " + f + "</div>";
+    const fixes = document.getElementById("fixes");
+    fixes.innerHTML = "";
+    (r.fixes||[]).forEach(f=>{
+        fixes.innerHTML += "<div class='item'>→ "+f+"</div>";
     });
 
-    // FIXES
-    const fixesDiv = document.getElementById("fixes");
-    fixesDiv.innerHTML = "";
-    (r.fixes || []).forEach(f => {
-        fixesDiv.innerHTML += "<div class='item'>→ " + f + "</div>";
-    });
+    document.getElementById("tool").innerText =
+        data.tool_result ? data.tool_result.output : "None";
 
-    // TOOL OUTPUT
-    const toolDiv = document.getElementById("tool");
-    toolDiv.innerHTML = data.tool_result
-        ? "<div class='item'>" + JSON.stringify(data.tool_result, null, 2) + "</div>"
-        : "<div class='item'>No diagnostics run</div>";
-
-    // AUTO FIX RESULT
-    const fixDiv = document.getElementById("fix");
-    fixDiv.innerHTML = data.fix_result
-        ? "<div class='item'>" + JSON.stringify(data.fix_result, null, 2) + "</div>"
-        : "<div class='item'>No auto fix executed</div>";
-
-    // LOAD MEMORY (DEBUG VIEW)
-    const memRes = await fetch("/api/case");
-    const mem = await memRes.json();
-
-    document.getElementById("memory").innerText =
-        JSON.stringify(mem, null, 2);
+    loadTimeline();
 }
+
+
+async function loadTimeline(){
+    const res = await fetch("/api/case");
+    const data = await res.json();
+
+    const div = document.getElementById("timeline");
+    div.innerHTML = "";
+
+    (data.history||[]).slice(-5).reverse().forEach(h=>{
+        div.innerHTML += `<div class='item'>
+            <b>Input:</b> ${h.input}<br>
+            <b>Result:</b> ${h.analysis}
+        </div>`;
+    });
+}
+
+
+async function loadMonitor(){
+    const res = await fetch("/api/monitor");
+    const data = await res.json();
+
+    const m = data.metrics;
+    const a = data.alerts;
+
+    document.getElementById("metrics").innerHTML = `
+        <div class="metric">CPU: ${m.cpu}%</div>
+        <div class="metric">Memory: ${m.memory}%</div>
+    `;
+
+    const alertsDiv = document.getElementById("alerts");
+    alertsDiv.innerHTML = "";
+
+    a.forEach(alert=>{
+        alertsDiv.innerHTML += `<div class="alert">⚠ ${alert}</div>`;
+    });
+}
+
+// refresh every 3 sec
+setInterval(loadMonitor, 3000);
+
 </script>
 
 </body>
