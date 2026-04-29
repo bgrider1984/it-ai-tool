@@ -3,26 +3,26 @@ import platform
 
 OS = platform.system()
 
-
 def run_cmd(command):
     try:
         if OS == "Windows":
             result = subprocess.run(
                 ["powershell", "-Command", command],
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=10
             )
         else:
             result = subprocess.run(
                 command,
                 shell=True,
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=10
             )
-
-        return result.stdout.strip()[:800]
+        return result.stdout.strip()[:800] or "No output"
     except Exception as e:
-        return str(e)
+        return f"Command failed: {str(e)}"
 
 
 FIX_MAP = {
@@ -38,34 +38,36 @@ FIX_MAP = {
     },
     "check_cpu": {
         "label": "Check CPU Usage",
-        "command": "Get-Process | Sort CPU -Descending | Select -First 5",
-        "verify": "Get-Process | Sort CPU -Descending | Select -First 5"
+        "command": "echo CPU check not supported on this OS",
+        "verify": "echo CPU verify not supported"
     }
 }
 
 
-def get_fix_details(fix_id):
-    return FIX_MAP.get(fix_id)
-
-
 def run_fix(fix_id):
-    if fix_id not in FIX_MAP:
-        return {"error": "Invalid fix"}
+    try:
+        action = FIX_MAP.get(fix_id)
+        if not action:
+            return {"error": "Unknown fix"}
 
-    action = FIX_MAP[fix_id]
-    return {
-        "fix": fix_id,
-        "label": action["label"],
-        "output": run_cmd(action["command"])
-    }
+        return {
+            "fix": fix_id,
+            "label": action["label"],
+            "output": run_cmd(action["command"])
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def verify_fix(fix_id):
-    if fix_id not in FIX_MAP:
-        return {"error": "Invalid fix"}
+    try:
+        action = FIX_MAP.get(fix_id)
+        if not action:
+            return {"error": "Unknown fix"}
 
-    action = FIX_MAP[fix_id]
-    return {
-        "fix": fix_id,
-        "verification": run_cmd(action["verify"])
-    }
+        return {
+            "fix": fix_id,
+            "verification": run_cmd(action["verify"])
+        }
+    except Exception as e:
+        return {"error": str(e)}
