@@ -1,13 +1,9 @@
-<!-- ONLY showing FIXES section + JS CHANGES (rest stays same as v7.1) -->
+<!-- ONLY SHOWING FIX AREA -->
 
-<div class="card">
-<div class="title">Suggested Fixes</div>
 <div id="fixes"></div>
-</div>
 
 <script>
-
-async function run(autoFix=false){
+async function run(){
     const text = document.getElementById("input").value;
 
     const res = await fetch("/api/run",{
@@ -17,49 +13,33 @@ async function run(autoFix=false){
     });
 
     const data = await res.json();
-    const r = data.result;
-
-    document.getElementById("analysis").innerText = r.analysis || "No analysis";
 
     const fixesDiv = document.getElementById("fixes");
     fixesDiv.innerHTML = "";
 
-    (r.fixes||[]).forEach(f=>{
+    data.fixes.forEach(f=>{
         fixesDiv.innerHTML += `
-        <div class="item">
-            → ${f}
-            <button onclick="runFix('${f}')">Run</button>
-            <button onclick="verifyFix('${f}')">Verify</button>
+        <div>
+            ${f.label}
+            <button onclick="runFix('${f.id}')">Run</button>
+            <button onclick="verifyFix('${f.id}')">Verify</button>
         </div>`;
     });
 }
 
-
-async function runFix(fix){
-    const res = await fetch("/api/fix",{
+async function runFix(id){
+    await fetch("/api/fix",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({fix})
+        body: JSON.stringify({fix:id})
     });
-
-    const data = await res.json();
-    alert("Fix executed:\n" + data.output);
-
-    loadTimeline();
 }
 
-
-async function verifyFix(fix){
-    const res = await fetch("/api/verify",{
+async function verifyFix(id){
+    await fetch("/api/verify",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({fix})
+        body: JSON.stringify({fix:id})
     });
-
-    const data = await res.json();
-    alert("Verification result:\n" + data.verification);
-
-    loadTimeline();
 }
-
 </script>
