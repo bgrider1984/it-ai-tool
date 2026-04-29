@@ -1,22 +1,22 @@
 import psutil
-import time
 
 def get_system_metrics():
-    return {
-        "cpu": psutil.cpu_percent(interval=0.5),
-        "memory": psutil.virtual_memory().percent,
-        "network_sent": psutil.net_io_counters().bytes_sent,
-        "network_recv": psutil.net_io_counters().bytes_recv
-    }
+    try:
+        return {
+            "cpu": psutil.cpu_percent(interval=0.3),
+            "memory": psutil.virtual_memory().percent
+        }
+    except:
+        return {"cpu": 0, "memory": 0}
 
 
 def detect_alerts(metrics):
     alerts = []
-
-    if metrics["cpu"] > 85:
-        alerts.append("High CPU usage detected")
-
-    if metrics["memory"] > 90:
-        alerts.append("High memory usage detected")
-
+    try:
+        if metrics["cpu"] > 85:
+            alerts.append("High CPU usage")
+        if metrics["memory"] > 90:
+            alerts.append("High memory usage")
+    except:
+        pass
     return alerts
