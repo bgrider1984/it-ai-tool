@@ -28,20 +28,22 @@ def run():
     case = load_case(cid)
 
     user_input = request.json.get("text", "")
+    allow_fix = request.json.get("auto_fix", False)
 
-    # 🧠 AI + KB
     result = run_agent(user_input, case)
 
-    # 🛠 Tool execution
     tool_result = None
-    if result.get("tool", {}).get("name"):
-        tool_result = run_tool(
-            result["tool"]["name"],
-            result["tool"].get("input", {})
-        )
-        case["tools"].append(tool_result)
 
-    # 💾 Save case
+    # 🛠 Run diagnostic tool
+    if result.get("tool", {}).get("name"):
+        tool_result = run_tool(result["tool"]["name"])
+
+    # 🔧 Run auto fix (only if allowed)
+    fix_result = None
+    if allow_fix and result.get("auto_fix"):
+        fix_result = run_tool(result["auto_fix"], allow_fix=True)
+
+    # 💾 Save
     case["history"].append(result)
     case["facts"].extend(result.get("facts", []))
     case["fixes"].extend(result.get("fixes", []))
@@ -51,13 +53,9 @@ def run():
 
     return jsonify({
         "result": result,
-        "tool_result": tool_result
+        "tool_result": tool_result,
+        "fix_result": fix_result
     })
-
-
-@app.route("/api/case")
-def get_case():
-    return jsonify(load_case(get_cid()))
 
 
 if __name__ == "__main__":
