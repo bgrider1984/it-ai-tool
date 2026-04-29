@@ -3,86 +3,57 @@ import os
 import json
 
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-MODEL = "gpt-4o-mini"
-
 
 SYSTEM = """
-You are an advanced IT troubleshooting AI.
-
-You can:
-- Diagnose issues
-- Suggest fixes
-- Decide when to run diagnostics
-- Suggest safe auto-fixes
-
-Available tools:
-- network_check
-- ip_config
-- usb_devices
-- disk_space
-- cpu_usage
-
-Available auto-fix actions:
-- reset_network
-- flush_dns
-- restart_adapter
+You are an IT troubleshooting AI.
 
 Return JSON:
 
 {
   "analysis": "",
-  "facts": [],
   "category": "",
-  "fixes": [],
-  "tool": {
-    "name": "",
-    "input": {}
-  },
-  "auto_fix": "",
-  "confidence": 0.0
+  "confidence": 0.0,
+  "fixes": [
+    {"id": "", "label": ""}
+  ]
 }
 
-Rules:
-- Only suggest auto_fix if confidence > 0.7
-- Prefer diagnostics before fixes
+Only use known fix IDs if relevant:
+- flush_dns
+- reset_network
+- check_cpu
 """
 
 
 def load_kb():
     try:
-        with open("knowledge_base.json", "r") as f:
+        with open("knowledge_base.json") as f:
             return json.load(f)
     except:
         return []
 
 
-def match_kb(user_input, kb):
+def match_kb(text, kb):
+    text = text.lower()
     matches = []
-    text = user_input.lower()
 
     for item in kb:
-        for keyword in item["keywords"]:
-            if keyword in text:
-                matches.append(item)
+        for k in item["keywords"]:
+            if k in text:
+                matches.extend(item["fixes"])
 
     return matches
 
 
 def run_agent(user_input, memory):
     kb = load_kb()
-    matches = match_kb(user_input, kb)
-
-    payload = {
-        "input": user_input,
-        "memory": memory,
-        "kb_matches": matches
-    }
+    kb_matches = match_kb(user_input, kb)
 
     res = client.chat.completions.create(
-        model=MODEL,
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": json.dumps(payload)}
+            {"role": "user", "content": user_input}
         ],
         response_format={"type": "json_object"}
     )
@@ -90,12 +61,8 @@ def run_agent(user_input, memory):
     result = json.loads(res.choices[0].message.content)
 
     # Merge KB fixes
-    if matches:
-        kb_fixes = []
-        for m in matches:
-            kb_fixes.extend(m["fixes"])
-
-        result["fixes"] = list(dict.fromkeys(kb_fixes + result.get("fixes", [])))
-        result["confidence"] = min(1.0, result.get("confidence", 0.5) + 0.2)
+    result["fixes"] = list({
+        f["id"]: f for f in (kb_matches + result.get("fixes", []))
+    }.values())
 
     return result
