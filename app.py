@@ -3,7 +3,7 @@ import uuid
 
 from db import init_db, load_case, save_case
 from agents import run_agent
-from tools import run_tool
+from tools import run_tool, run_fix, verify_fix
 from monitor import get_system_metrics, detect_alerts
 
 app = Flask(__name__)
@@ -29,7 +29,6 @@ def run():
     case = load_case(cid)
 
     user_input = request.json.get("text", "")
-    allow_fix = request.json.get("auto_fix", False)
 
     result = run_agent(user_input, case)
 
@@ -37,40 +36,69 @@ def run():
     if result.get("tool", {}).get("name"):
         tool_result = run_tool(result["tool"]["name"])
 
-    fix_result = None
-    if allow_fix and result.get("auto_fix"):
-        fix_result = run_tool(result["auto_fix"], allow_fix=True)
-
-    # timeline log
-    entry = {
+    case["history"].append({
+        "type": "analysis",
         "input": user_input,
-        "analysis": result.get("analysis"),
-        "confidence": result.get("confidence")
-    }
+        "analysis": result.get("analysis")
+    })
 
-    case["history"].append(entry)
-    case["facts"].extend(result.get("facts", []))
-    case["fixes"].extend(result.get("fixes", []))
-    case["confidence"] = result.get("confidence", case["confidence"])
+    case["fixes"] = result.get("fixes", [])
 
     save_case(cid, case)
 
     return jsonify({
         "result": result,
-        "tool_result": tool_result,
-        "fix_result": fix_result
+        "tool_result": tool_result
     })
+
+
+# 🔧 RUN FIX
+@app.route("/api/fix", methods=["POST"])
+def fix():
+    cid = get_cid()
+    case = load_case(cid)
+
+    fix_name = request.json.get("fix")
+
+    result = run_fix(fix_name)
+
+    case["history"].append({
+        "type": "fix",
+        "fix": fix_name,
+        "output": result.get("output")
+    })
+
+    save_case(cid, case)
+
+    return jsonify(result)
+
+
+# 🔍 VERIFY FIX
+@app.route("/api/verify", methods=["POST"])
+def verify():
+    cid = get_cid()
+    case = load_case(cid)
+
+    fix_name = request.json.get("fix")
+
+    result = verify_fix(fix_name)
+
+    case["history"].append({
+        "type": "verify",
+        "fix": fix_name,
+        "result": result.get("verification")
+    })
+
+    save_case(cid, case)
+
+    return jsonify(result)
 
 
 @app.route("/api/monitor")
 def monitor():
     metrics = get_system_metrics()
     alerts = detect_alerts(metrics)
-
-    return jsonify({
-        "metrics": metrics,
-        "alerts": alerts
-    })
+    return jsonify({"metrics": metrics, "alerts": alerts})
 
 
 @app.route("/api/case")
