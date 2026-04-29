@@ -1,32 +1,15 @@
 [
   {
-    "keywords": ["mouse stops working", "mouse disconnects", "usb mouse"],
-    "category": "hardware",
+    "keywords": ["internet", "network", "disconnect"],
     "fixes": [
-      "Try a different USB port",
-      "Disable USB power saving in Device Manager",
-      "Update mouse drivers",
-      "Check for loose cable or hardware fault"
+      {"id": "flush_dns", "label": "Flush DNS Cache"},
+      {"id": "reset_network", "label": "Reset Network Adapter"}
     ]
   },
   {
-    "keywords": ["no internet", "cannot connect", "network issue"],
-    "category": "network",
+    "keywords": ["slow", "lag", "performance"],
     "fixes": [
-      "Restart router and modem",
-      "Run network troubleshooter",
-      "Check IP configuration",
-      "Flush DNS cache"
-    ]
-  },
-  {
-    "keywords": ["computer slow", "lag", "performance issue"],
-    "category": "software",
-    "fixes": [
-      "Check task manager for high CPU usage",
-      "Disable startup programs",
-      "Run antivirus scan",
-      "Free up disk space"
+      {"id": "check_cpu", "label": "Check CPU Usage"}
     ]
   }
 ]
