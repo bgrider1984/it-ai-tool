@@ -6,7 +6,7 @@
 
 <style>
 body { margin:0; font-family:Arial; background:#0b1220; color:#e5e7eb; }
-header { padding:12px; background:#111827; font-weight:bold; }
+header { padding:12px; background:#111827; }
 
 .container {
     display:grid;
@@ -51,7 +51,11 @@ button {
     background:#020617;
     overflow-y:auto;
     padding:10px;
+    font-size:12px;
 }
+
+.error { color:#f87171; }
+.loading { color:#fbbf24; }
 </style>
 </head>
 
@@ -66,11 +70,11 @@ button {
 <textarea id="input" placeholder="Describe your issue..."></textarea>
 
 <br>
-<button onclick="run()">Analyze</button>
+<button id="analyzeBtn">Analyze</button>
 
 <div class="card">
 <b>Analysis</b>
-<div id="analysis"></div>
+<div id="analysis">Waiting...</div>
 </div>
 
 <div class="card">
@@ -87,6 +91,11 @@ button {
 <div id="monitor"></div>
 </div>
 
+<div class="card">
+<b>Errors</b>
+<div id="errors" class="error"></div>
+</div>
+
 </div>
 
 </div>
@@ -95,32 +104,78 @@ button {
 
 <script>
 
+// 🔥 GUARANTEED BUTTON + ENTER WIRING
+const input = document.getElementById("input");
+const analyzeBtn = document.getElementById("analyzeBtn");
+
+analyzeBtn.addEventListener("click", run);
+
+input.addEventListener("keydown", function(e){
+    if(e.key === "Enter" && !e.shiftKey){
+        e.preventDefault();
+        run();
+    }
+});
+
+function showError(msg){
+    document.getElementById("errors").innerText = msg;
+}
+
+function clearError(){
+    document.getElementById("errors").innerText = "";
+}
+
 async function run(){
-    const text = document.getElementById("input").value;
+    try {
+        clearError();
 
-    const res = await fetch("/api/run",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({text})
-    });
+        const text = input.value.trim();
+        if(!text) return;
 
-    const data = await res.json();
+        document.getElementById("analysis").innerHTML =
+            "<span class='loading'>Analyzing...</span>";
 
-    document.getElementById("analysis").innerText = data.analysis || "No response";
+        const res = await fetch("/api/run",{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({text})
+        });
 
-    const fixesDiv = document.getElementById("fixes");
-    fixesDiv.innerHTML = "";
+        const json = await res.json();
 
-    (data.fixes || []).forEach(f=>{
-        fixesDiv.innerHTML += `
-        <div>
-            ${f.label}
-            <button onclick="runFix('${f.id}')">Run</button>
-            <button onclick="verifyFix('${f.id}')">Verify</button>
-        </div>`;
-    });
+        console.log("API RESPONSE:", json);
 
-    loadTimeline();
+        if(!json.success){
+            showError(json.error || "Unknown error");
+            document.getElementById("analysis").innerText = "Error occurred";
+            return;
+        }
+
+        const data = json.data || {};
+
+        // ✅ FIXED PARSING
+        document.getElementById("analysis").innerText =
+            data.analysis || "No analysis returned";
+
+        // FIXES
+        const fixesDiv = document.getElementById("fixes");
+        fixesDiv.innerHTML = "";
+
+        (data.fixes || []).forEach(f=>{
+            fixesDiv.innerHTML += `
+            <div>
+                ${f.label}
+                <button onclick="runFix('${f.id}')">Run</button>
+                <button onclick="verifyFix('${f.id}')">Verify</button>
+            </div>`;
+        });
+
+        loadTimeline();
+
+    } catch (err){
+        showError(err.message);
+        document.getElementById("analysis").innerText = "Request failed";
+    }
 }
 
 async function runFix(id){
@@ -129,6 +184,7 @@ async function runFix(id){
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({fix:id})
     });
+    loadTimeline();
 }
 
 async function verifyFix(id){
@@ -137,21 +193,49 @@ async function verifyFix(id){
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({fix:id})
     });
+    loadTimeline();
 }
 
 async function loadTimeline(){
-    const res = await fetch("/api/case");
-    const data = await res.json();
+    try {
+        const res = await fetch("/api/case");
+        const json = await res.json();
 
-    const t = document.getElementById("timeline");
-    t.innerHTML = "";
+        if(!json.success) return;
 
-    (data.history || []).slice(-5).reverse().forEach(h=>{
-        t.innerHTML += `<div>
-            <b>${h.type}</b>: ${h.input || h.fix}
-        </div>`;
-    });
+        const t = document.getElementById("timeline");
+        t.innerHTML = "";
+
+        (json.data.history || []).slice(-10).reverse().forEach(h=>{
+            t.innerHTML += `
+            <div>
+                <b>${h.type}</b>: ${h.input || h.fix}
+            </div>`;
+        });
+
+    } catch(e){
+        showError(e.message);
+    }
 }
+
+async function monitor(){
+    try {
+        const res = await fetch("/api/monitor");
+        const json = await res.json();
+
+        if(!json.success) return;
+
+        const m = json.data.metrics;
+
+        document.getElementById("monitor").innerText =
+            `CPU: ${m.cpu}% | Memory: ${m.memory}%`;
+
+    } catch(e){
+        showError(e.message);
+    }
+}
+
+setInterval(monitor, 3000);
 
 </script>
 
