@@ -7,7 +7,7 @@
     ]
   },
   {
-    "keywords": ["slow", "lag", "performance"],
+    "keywords": ["slow", "lag"],
     "fixes": [
       {"id": "check_cpu", "label": "Check CPU Usage"}
     ]
