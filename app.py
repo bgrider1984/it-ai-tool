@@ -4,6 +4,7 @@ import uuid
 from db import init_db, load_case, save_case
 from agents import run_agent
 from tools import run_tool
+from monitor import get_system_metrics, detect_alerts
 
 app = Flask(__name__)
 app.secret_key = "change-this"
@@ -33,18 +34,21 @@ def run():
     result = run_agent(user_input, case)
 
     tool_result = None
-
-    # 🛠 Run diagnostic tool
     if result.get("tool", {}).get("name"):
         tool_result = run_tool(result["tool"]["name"])
 
-    # 🔧 Run auto fix (only if allowed)
     fix_result = None
     if allow_fix and result.get("auto_fix"):
         fix_result = run_tool(result["auto_fix"], allow_fix=True)
 
-    # 💾 Save
-    case["history"].append(result)
+    # timeline log
+    entry = {
+        "input": user_input,
+        "analysis": result.get("analysis"),
+        "confidence": result.get("confidence")
+    }
+
+    case["history"].append(entry)
     case["facts"].extend(result.get("facts", []))
     case["fixes"].extend(result.get("fixes", []))
     case["confidence"] = result.get("confidence", case["confidence"])
@@ -56,6 +60,22 @@ def run():
         "tool_result": tool_result,
         "fix_result": fix_result
     })
+
+
+@app.route("/api/monitor")
+def monitor():
+    metrics = get_system_metrics()
+    alerts = detect_alerts(metrics)
+
+    return jsonify({
+        "metrics": metrics,
+        "alerts": alerts
+    })
+
+
+@app.route("/api/case")
+def case():
+    return jsonify(load_case(get_cid()))
 
 
 if __name__ == "__main__":
