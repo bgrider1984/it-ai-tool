@@ -1,194 +1,11 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>AI Helpdesk</title>
-
-<style>
-body {
-    margin:0;
-    font-family:Segoe UI, Arial;
-    background:#0b1220;
-    color:#e5e7eb;
-}
-
-header {
-    padding:12px;
-    background:#111827;
-    font-weight:bold;
-    font-size:18px;
-    border-bottom:1px solid #1f2937;
-}
-
-.container {
-    display:grid;
-    grid-template-columns: 2fr 1fr;
-    height: calc(100vh - 50px);
-}
-
-.left, .right {
-    padding:15px;
-}
-
-.left { border-right:1px solid #1f2937; }
-
-textarea {
-    width:100%;
-    height:90px;
-    background:#111827;
-    color:white;
-    border:1px solid #1f2937;
-    padding:10px;
-    border-radius:6px;
-    resize:none;
-}
-
-button {
-    margin-top:10px;
-    padding:8px 12px;
-    background:#2563eb;
-    border:none;
-    color:white;
-    cursor:pointer;
-    border-radius:5px;
-    margin-right:5px;
-}
-
-button.secondary {
-    background:#374151;
-}
-
-.card {
-    background:#111827;
-    padding:12px;
-    margin-top:12px;
-    border-radius:8px;
-    border:1px solid #1f2937;
-}
-
-.title {
-    font-size:13px;
-    color:#60a5fa;
-    margin-bottom:6px;
-}
-
-.item {
-    font-size:13px;
-    margin-bottom:5px;
-}
-
-.fix {
-    cursor:pointer;
-    color:#34d399;
-}
-
-.timeline {
-    position:fixed;
-    bottom:0;
-    left:0;
-    right:0;
-    height:180px;
-    background:#020617;
-    border-top:1px solid #1f2937;
-    overflow-y:auto;
-    padding:10px;
-}
-
-.timeline-entry {
-    border-bottom:1px solid #1f2937;
-    margin-bottom:8px;
-    padding-bottom:6px;
-}
-
-.input {
-    color:#93c5fd;
-}
-
-.result {
-    color:#cbd5f5;
-}
-
-.bar {
-    height:6px;
-    background:#1f2937;
-    border-radius:5px;
-    margin-top:4px;
-}
-
-.fill {
-    height:6px;
-    background:#22c55e;
-    border-radius:5px;
-}
-</style>
-</head>
-
-<body>
-
-<header>AI Helpdesk — v7.1</header>
-
-<div class="container">
-
-<div class="left">
-
-<textarea id="input" placeholder="Describe your issue..."></textarea>
-
-<br>
-<button onclick="run()">Analyze</button>
-<button onclick="run(true)">Auto Fix</button>
-<button class="secondary" onclick="downloadCase()">Download Report</button>
-
-<div class="card">
-<div class="title">Analysis</div>
-<div id="analysis"></div>
-</div>
+<!-- ONLY showing FIXES section + JS CHANGES (rest stays same as v7.1) -->
 
 <div class="card">
 <div class="title">Suggested Fixes</div>
 <div id="fixes"></div>
 </div>
 
-<div class="card">
-<div class="title">Tool Output</div>
-<div id="tool"></div>
-</div>
-
-</div>
-
-<div class="right">
-
-<div class="card">
-<div class="title">System Monitor</div>
-
-CPU: <span id="cpu"></span>
-<div class="bar"><div id="cpuBar" class="fill"></div></div>
-
-Memory: <span id="mem"></span>
-<div class="bar"><div id="memBar" class="fill"></div></div>
-
-</div>
-
-<div class="card">
-<div class="title">Alerts</div>
-<div id="alerts"></div>
-</div>
-
-</div>
-
-</div>
-
-<!-- TIMELINE -->
-<div class="timeline" id="timeline"></div>
-
 <script>
-
-// ENTER KEY SUPPORT
-document.getElementById("input").addEventListener("keydown", function(e){
-    if(e.key === "Enter" && !e.shiftKey){
-        e.preventDefault();
-        run();
-    }
-});
 
 async function run(autoFix=false){
     const text = document.getElementById("input").value;
@@ -196,7 +13,7 @@ async function run(autoFix=false){
     const res = await fetch("/api/run",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({text, auto_fix:autoFix})
+        body: JSON.stringify({text})
     });
 
     const data = await res.json();
@@ -204,81 +21,45 @@ async function run(autoFix=false){
 
     document.getElementById("analysis").innerText = r.analysis || "No analysis";
 
-    // FIXES
     const fixesDiv = document.getElementById("fixes");
     fixesDiv.innerHTML = "";
 
     (r.fixes||[]).forEach(f=>{
-        fixesDiv.innerHTML += `<div class="item fix" onclick="copy('${f}')">→ ${f}</div>`;
-    });
-
-    // TOOL OUTPUT
-    document.getElementById("tool").innerText =
-        data.tool_result?.output || "No diagnostics";
-
-    loadTimeline();
-}
-
-function copy(text){
-    navigator.clipboard.writeText(text);
-    alert("Copied fix step");
-}
-
-// TIMELINE
-async function loadTimeline(){
-    const res = await fetch("/api/case");
-    const data = await res.json();
-
-    const t = document.getElementById("timeline");
-    t.innerHTML = "";
-
-    (data.history||[]).slice(-10).reverse().forEach(h=>{
-        t.innerHTML += `
-        <div class="timeline-entry">
-            <div class="input"><b>Input:</b> ${h.input}</div>
-            <div class="result"><b>Result:</b> ${h.analysis}</div>
+        fixesDiv.innerHTML += `
+        <div class="item">
+            → ${f}
+            <button onclick="runFix('${f}')">Run</button>
+            <button onclick="verifyFix('${f}')">Verify</button>
         </div>`;
     });
 }
 
-// MONITOR
-async function monitor(){
-    const res = await fetch("/api/monitor");
+
+async function runFix(fix){
+    const res = await fetch("/api/fix",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({fix})
+    });
+
     const data = await res.json();
+    alert("Fix executed:\n" + data.output);
 
-    const m = data.metrics;
-
-    document.getElementById("cpu").innerText = m.cpu + "%";
-    document.getElementById("mem").innerText = m.memory + "%";
-
-    document.getElementById("cpuBar").style.width = m.cpu + "%";
-    document.getElementById("memBar").style.width = m.memory + "%";
-
-    const alerts = document.getElementById("alerts");
-    alerts.innerHTML = "";
-
-    data.alerts.forEach(a=>{
-        alerts.innerHTML += `<div class="item">⚠ ${a}</div>`;
-    });
+    loadTimeline();
 }
 
-function downloadCase(){
-    fetch("/api/case")
-    .then(r=>r.json())
-    .then(data=>{
-        const blob = new Blob([JSON.stringify(data,null,2)], {type:"application/json"});
-        const url = URL.createObjectURL(blob);
 
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "case.json";
-        a.click();
+async function verifyFix(fix){
+    const res = await fetch("/api/verify",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({fix})
     });
-}
 
-setInterval(monitor, 3000);
+    const data = await res.json();
+    alert("Verification result:\n" + data.verification);
+
+    loadTimeline();
+}
 
 </script>
-
-</body>
-</html>
