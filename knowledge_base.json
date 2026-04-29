@@ -1,52 +1,32 @@
 [
   {
-    "title": "AD Login Failure",
-    "keywords": ["login", "password", "account locked", "cannot sign in"],
-    "content": "Check AD lockout status, reset password, verify replication, clear cached credentials, test login on web apps."
+    "keywords": ["mouse stops working", "mouse disconnects", "usb mouse"],
+    "category": "hardware",
+    "fixes": [
+      "Try a different USB port",
+      "Disable USB power saving in Device Manager",
+      "Update mouse drivers",
+      "Check for loose cable or hardware fault"
+    ]
   },
   {
-    "title": "VPN Issues",
-    "keywords": ["vpn", "remote", "cannot connect"],
-    "content": "Clear saved credentials, verify MFA sync, restart VPN client, check firewall and gateway status."
+    "keywords": ["no internet", "cannot connect", "network issue"],
+    "category": "network",
+    "fixes": [
+      "Restart router and modem",
+      "Run network troubleshooter",
+      "Check IP configuration",
+      "Flush DNS cache"
+    ]
   },
   {
-    "title": "Outlook Issues",
-    "keywords": ["outlook", "email", "not opening", "stuck"],
-    "content": "Test safe mode, disable add-ins, rebuild profile, repair OST file, check M365 service health."
-  },
-  {
-    "title": "Slow PC",
-    "keywords": ["slow", "lag", "freezing", "performance"],
-    "content": "Check CPU/memory usage, disable startup apps, scan malware, verify disk health, apply updates."
-  },
-  {
-    "title": "Printer Issues",
-    "keywords": ["printer", "printing", "spooler"],
-    "content": "Restart print spooler, clear queue, reinstall drivers, check network printer connectivity."
-  },
-  {
-    "title": "Network Issues",
-    "keywords": ["no internet", "dns", "network"],
-    "content": "Run ipconfig renew, flush DNS, test gateway, check DHCP, verify switch/WiFi connection."
-  },
-  {
-    "title": "Mapped Drives",
-    "keywords": ["drive", "mapped", "network drive"],
-    "content": "Run gpupdate, verify login scripts, check permissions, remap drive manually."
-  },
-  {
-    "title": "Teams Issues",
-    "keywords": ["teams", "microsoft teams"],
-    "content": "Clear Teams cache, sign out/in, reinstall app, verify O365 service status."
-  },
-  {
-    "title": "MFA Problems",
-    "keywords": ["mfa", "authenticator", "2fa"],
-    "content": "Resync device time, re-register authenticator app, verify account settings in Azure AD."
-  },
-  {
-    "title": "Software Install Failures",
-    "keywords": ["install", "setup", "error"],
-    "content": "Run as admin, check permissions, disable AV temporarily, verify installer integrity."
+    "keywords": ["computer slow", "lag", "performance issue"],
+    "category": "software",
+    "fixes": [
+      "Check task manager for high CPU usage",
+      "Disable startup programs",
+      "Run antivirus scan",
+      "Free up disk space"
+    ]
   }
 ]
