@@ -1,44 +1,70 @@
 import subprocess
+import platform
 
-def run_powershell(command):
+OS = platform.system()
+
+
+def run_cmd(command):
     try:
-        result = subprocess.run(
-            ["powershell", "-Command", command],
-            capture_output=True,
-            text=True
-        )
+        if OS == "Windows":
+            result = subprocess.run(
+                ["powershell", "-Command", command],
+                capture_output=True,
+                text=True
+            )
+        else:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True
+            )
+
         return result.stdout.strip()[:800]
     except Exception as e:
         return str(e)
 
 
-SAFE_COMMANDS = {
-    "network_check": "Get-NetAdapter | Format-Table",
-    "ip_config": "ipconfig",
-    "usb_devices": "Get-PnpDevice -Class USB",
-    "disk_space": "Get-PSDrive -PSProvider FileSystem",
-    "cpu_usage": "Get-Process | Sort CPU -Descending | Select -First 5"
+# 🔧 FIX ACTION MAP (SAFE)
+FIX_ACTIONS = {
+    "Flush DNS": {
+        "command": "ipconfig /flushdns",
+        "verify": "ipconfig"
+    },
+    "Reset Network": {
+        "command": "ipconfig /release; ipconfig /renew",
+        "verify": "ipconfig"
+    },
+    "Check CPU Load": {
+        "command": "Get-Process | Sort CPU -Descending | Select -First 5",
+        "verify": "Get-Process | Sort CPU -Descending | Select -First 5"
+    }
 }
 
-SAFE_FIXES = {
-    "flush_dns": "ipconfig /flushdns",
-    "reset_network": "ipconfig /release; ipconfig /renew"
-}
+
+def run_fix(fix_name):
+    if fix_name not in FIX_ACTIONS:
+        return {"error": "Fix not supported"}
+
+    action = FIX_ACTIONS[fix_name]
+
+    result = run_cmd(action["command"])
+
+    return {
+        "fix": fix_name,
+        "output": result
+    }
 
 
-def run_tool(name, allow_fix=False):
-    if name in SAFE_COMMANDS:
-        return {
-            "type": "diagnostic",
-            "tool": name,
-            "output": run_powershell(SAFE_COMMANDS[name])
-        }
+def verify_fix(fix_name):
+    if fix_name not in FIX_ACTIONS:
+        return {"error": "Verification not supported"}
 
-    if allow_fix and name in SAFE_FIXES:
-        return {
-            "type": "fix",
-            "tool": name,
-            "output": run_powershell(SAFE_FIXES[name])
-        }
+    verify_cmd = FIX_ACTIONS[fix_name]["verify"]
 
-    return {"error": "Unknown or not allowed"}
+    result = run_cmd(verify_cmd)
+
+    return {
+        "fix": fix_name,
+        "verification": result
+    }
