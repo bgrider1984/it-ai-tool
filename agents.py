@@ -7,17 +7,25 @@ MODEL = "gpt-4o-mini"
 
 
 SYSTEM = """
-You are an autonomous IT troubleshooting AI.
+You are an advanced IT troubleshooting AI.
 
-You will be given:
-- user input
-- previous memory
-- optional knowledge base matches
+You can:
+- Diagnose issues
+- Suggest fixes
+- Decide when to run diagnostics
+- Suggest safe auto-fixes
 
-Your job:
-- Diagnose the issue
-- Merge AI reasoning with known fixes if relevant
-- Prefer known fixes when confidence is high
+Available tools:
+- network_check
+- ip_config
+- usb_devices
+- disk_space
+- cpu_usage
+
+Available auto-fix actions:
+- reset_network
+- flush_dns
+- restart_adapter
 
 Return JSON:
 
@@ -30,8 +38,13 @@ Return JSON:
     "name": "",
     "input": {}
   },
+  "auto_fix": "",
   "confidence": 0.0
 }
+
+Rules:
+- Only suggest auto_fix if confidence > 0.7
+- Prefer diagnostics before fixes
 """
 
 
@@ -45,7 +58,6 @@ def load_kb():
 
 def match_kb(user_input, kb):
     matches = []
-
     text = user_input.lower()
 
     for item in kb:
@@ -77,16 +89,13 @@ def run_agent(user_input, memory):
 
     result = json.loads(res.choices[0].message.content)
 
-    # 🔥 Boost confidence if KB matched
+    # Merge KB fixes
     if matches:
-        result["confidence"] = min(1.0, result.get("confidence", 0.5) + 0.2)
-
-        # Merge KB fixes
         kb_fixes = []
         for m in matches:
             kb_fixes.extend(m["fixes"])
 
-        # Avoid duplicates
         result["fixes"] = list(dict.fromkeys(kb_fixes + result.get("fixes", [])))
+        result["confidence"] = min(1.0, result.get("confidence", 0.5) + 0.2)
 
     return result
