@@ -3,68 +3,90 @@ import os
 import json
 
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
 MODEL = "gpt-4o-mini"
 
 
-DIAGNOSER = """
-You are a senior IT diagnostic engine.
+SYSTEM = """
+You are an autonomous IT troubleshooting AI.
+
+You will be given:
+- user input
+- previous memory
+- optional knowledge base matches
+
+Your job:
+- Diagnose the issue
+- Merge AI reasoning with known fixes if relevant
+- Prefer known fixes when confidence is high
 
 Return JSON:
+
 {
   "analysis": "",
   "facts": [],
-  "category": "hardware|software|network|unknown",
+  "category": "",
+  "fixes": [],
+  "tool": {
+    "name": "",
+    "input": {}
+  },
   "confidence": 0.0
 }
 """
 
-FIXER = """
-You are a repair specialist.
 
-Return JSON:
-{
-  "fixes": []
-}
-"""
-
-CLARIFIER = """
-You are a troubleshooting interviewer.
-
-Return JSON:
-{
-  "questions": []
-}
-"""
+def load_kb():
+    try:
+        with open("knowledge_base.json", "r") as f:
+            return json.load(f)
+    except:
+        return []
 
 
-def call(system, user):
+def match_kb(user_input, kb):
+    matches = []
+
+    text = user_input.lower()
+
+    for item in kb:
+        for keyword in item["keywords"]:
+            if keyword in text:
+                matches.append(item)
+
+    return matches
+
+
+def run_agent(user_input, memory):
+    kb = load_kb()
+    matches = match_kb(user_input, kb)
+
+    payload = {
+        "input": user_input,
+        "memory": memory,
+        "kb_matches": matches
+    }
+
     res = client.chat.completions.create(
         model=MODEL,
         messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user}
+            {"role": "system", "content": SYSTEM},
+            {"role": "user", "content": json.dumps(payload)}
         ],
         response_format={"type": "json_object"}
     )
-    return json.loads(res.choices[0].message.content)
 
+    result = json.loads(res.choices[0].message.content)
 
-def run_pipeline(text):
-    diagnosis = call(DIAGNOSER, text)
-    fixes = call(FIXER, json.dumps(diagnosis))
+    # 🔥 Boost confidence if KB matched
+    if matches:
+        result["confidence"] = min(1.0, result.get("confidence", 0.5) + 0.2)
 
-    confidence = diagnosis.get("confidence", 0.5)
+        # Merge KB fixes
+        kb_fixes = []
+        for m in matches:
+            kb_fixes.extend(m["fixes"])
 
-    questions = []
-    if confidence < 0.65:
-        questions = call(CLARIFIER, json.dumps(diagnosis)).get("questions", [])
+        # Avoid duplicates
+        result["fixes"] = list(dict.fromkeys(kb_fixes + result.get("fixes", [])))
 
-    return {
-        "analysis": diagnosis.get("analysis", ""),
-        "facts": diagnosis.get("facts", []),
-        "category": diagnosis.get("category", "unknown"),
-        "fixes": fixes.get("fixes", []),
-        "questions": questions,
-        "confidence": confidence
-    }
+    return result
