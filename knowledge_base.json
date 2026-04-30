@@ -20,5 +20,41 @@
         "no": "fix_power_connection"
       }
     ]
+  },
+
+  {
+    "type": "result",
+    "name": "psu_failure",
+    "analysis": "Likely power supply failure.",
+    "fixes": [
+      {"id": "check_psu", "label": "Test or replace power supply"},
+      {"id": "check_power", "label": "Verify power cable and outlet"}
+    ]
+  },
+  {
+    "type": "result",
+    "name": "motherboard_or_psu",
+    "analysis": "Possible motherboard or PSU failure.",
+    "fixes": [
+      {"id": "check_psu", "label": "Test power supply"},
+      {"id": "reseat_gpu", "label": "Reseat internal components"}
+    ]
+  },
+  {
+    "type": "result",
+    "name": "display_issue",
+    "analysis": "System may be running but display is failing.",
+    "fixes": [
+      {"id": "check_monitor", "label": "Check monitor connection"},
+      {"id": "try_hdmi", "label": "Try different cable or port"}
+    ]
+  },
+  {
+    "type": "result",
+    "name": "fix_power_connection",
+    "analysis": "Power connection issue detected.",
+    "fixes": [
+      {"id": "check_power", "label": "Plug in power cable securely"}
+    ]
   }
 ]
