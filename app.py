@@ -6,11 +6,17 @@ from agents import run_agent
 from tools import run_fix, verify_fix
 from monitor import get_system_metrics, detect_alerts
 
+# ✅ CREATE APP FIRST (CRITICAL)
 app = Flask(__name__)
 app.secret_key = "safe-key"
 
+# ✅ INIT DB AFTER APP
 init_db()
 
+
+# ----------------------------
+# Helpers
+# ----------------------------
 
 def get_cid():
     if "cid" not in session:
@@ -26,12 +32,13 @@ def safe_response(data=None, error=None):
     })
 
 
+# ----------------------------
+# Routes
+# ----------------------------
+
 @app.route("/")
 def home():
-    try:
-        return render_template("dashboard.html")
-    except Exception as e:
-        return f"Template error: {str(e)}"
+    return render_template("dashboard.html")
 
 
 @app.route("/api/run", methods=["POST"])
@@ -44,7 +51,6 @@ def run():
 
         result = run_agent(text, case)
 
-        # 🔥 Save guided + normal flow history
         case["history"].append({
             "type": "step",
             "input": text,
@@ -128,5 +134,8 @@ def case():
         return safe_response(error=str(e))
 
 
+# ----------------------------
+# Local Run (NOT used by Render)
+# ----------------------------
 if __name__ == "__main__":
     app.run(debug=True)
