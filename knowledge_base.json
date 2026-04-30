@@ -1,46 +1,24 @@
 [
   {
-    "keywords": ["internet", "network", "disconnect"],
-    "fixes": [
-      {"id": "flush_dns", "label": "Flush DNS Cache"},
-      {"id": "reset_network", "label": "Reset Network Adapter"}
-    ]
-  },
-  {
-    "keywords": ["slow", "lag", "freezing"],
-    "fixes": [
-      {"id": "check_cpu", "label": "Check CPU Usage"}
-    ]
-  },
-  {
-    "keywords": ["won't turn on", "no power", "dead", "not powering"],
-    "fixes": [
-      {"id": "check_power", "label": "Check power cable and outlet"},
-      {"id": "check_psu", "label": "Test power supply"},
-      {"id": "remove_battery", "label": "Remove battery and hold power button (laptops)"}
-    ]
-  },
-  {
-    "keywords": ["no display", "black screen", "monitor not working"],
-    "fixes": [
-      {"id": "check_monitor", "label": "Check monitor cable and input"},
-      {"id": "reseat_gpu", "label": "Reseat graphics card"},
-      {"id": "try_hdmi", "label": "Try different display cable/port"}
-    ]
-  },
-  {
-    "keywords": ["overheating", "shutting down", "hot"],
-    "fixes": [
-      {"id": "clean_fans", "label": "Clean dust from fans"},
-      {"id": "check_thermal", "label": "Check thermal paste"},
-      {"id": "improve_airflow", "label": "Improve case airflow"}
-    ]
-  },
-  {
-    "keywords": ["keyboard not working", "mouse not working"],
-    "fixes": [
-      {"id": "check_usb", "label": "Try different USB port"},
-      {"id": "replace_device", "label": "Test with another device"}
+    "type": "guided",
+    "name": "power_issue",
+    "triggers": ["won't turn on", "no power", "dead"],
+    "steps": [
+      {
+        "question": "Is anything lighting up or making noise when you press power?",
+        "yes": 1,
+        "no": 2
+      },
+      {
+        "question": "Do you see fans spinning or hear beeps?",
+        "yes": "display_issue",
+        "no": "motherboard_or_psu"
+      },
+      {
+        "question": "Is the power cable securely plugged in and outlet working?",
+        "yes": "psu_failure",
+        "no": "fix_power_connection"
+      }
     ]
   }
 ]
