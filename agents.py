@@ -19,7 +19,7 @@ def load_kb():
         return []
 
 
-# 🔥 FIND MATCHING GUIDED FLOW
+# 🔍 Find guided flow
 def find_guided_flow(text, kb):
     text = text.lower()
 
@@ -28,21 +28,27 @@ def find_guided_flow(text, kb):
             for t in item.get("triggers", []):
                 if t in text:
                     return item
-
     return None
 
 
-# 🔥 START GUIDED SESSION
+# 🔍 Find result mapping
+def find_result(name, kb):
+    for item in kb:
+        if item.get("type") == "result" and item.get("name") == name:
+            return item
+    return None
+
+
 def start_guided(flow):
     return {
         "mode": "guided",
         "flow": flow["name"],
         "step": 0,
-        "question": flow["steps"][0]["question"]
+        "analysis": flow["steps"][0]["question"],
+        "fixes": []
     }
 
 
-# 🔥 PROCESS ANSWER
 def next_step(flow, step_index, answer):
     steps = flow["steps"]
     step = steps[step_index]
@@ -51,11 +57,10 @@ def next_step(flow, step_index, answer):
     result = step.get(key)
 
     if isinstance(result, int):
-        next_step_data = steps[result]
         return {
             "done": False,
             "step": result,
-            "question": next_step_data["question"]
+            "question": steps[result]["question"]
         }
 
     return {
@@ -67,7 +72,7 @@ def next_step(flow, step_index, answer):
 def run_agent(user_input, memory):
     kb = load_kb()
 
-    # 🔥 CONTINUE GUIDED
+    # 🔁 CONTINUE GUIDED FLOW
     if memory.get("mode") == "guided":
         flow = next((f for f in kb if f.get("name") == memory["flow"]), None)
 
@@ -78,12 +83,23 @@ def run_agent(user_input, memory):
 
         step_result = next_step(flow, memory["step"], answer)
 
+        # 🔥 FINAL RESULT → INJECT FIXES
         if step_result["done"]:
+            result_name = step_result["result"]
+            result_data = find_result(result_name, kb)
+
+            if result_data:
+                return {
+                    "analysis": result_data.get("analysis"),
+                    "fixes": result_data.get("fixes", [])
+                }
+
             return {
-                "analysis": f"Diagnosis: {step_result['result']}",
+                "analysis": f"Diagnosis: {result_name}",
                 "fixes": []
             }
 
+        # 🔁 CONTINUE FLOW
         memory["step"] = step_result["step"]
 
         return {
@@ -91,21 +107,20 @@ def run_agent(user_input, memory):
             "fixes": []
         }
 
-    # 🔥 START GUIDED IF MATCH
+    # 🚀 START NEW GUIDED FLOW
     flow = find_guided_flow(user_input, kb)
 
     if flow:
         session = start_guided(flow)
-
         memory.update(session)
 
         return {
-            "analysis": session["question"],
+            "analysis": session["analysis"],
             "fixes": []
         }
 
-    # 🔥 FALLBACK (no guided match)
+    # 🧠 FALLBACK
     return {
-        "analysis": "No guided flow matched. Provide more detail.",
+        "analysis": "No guided troubleshooting available for this issue yet.",
         "fixes": []
     }
