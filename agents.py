@@ -19,76 +19,93 @@ def load_kb():
         return []
 
 
-def match_kb(text, kb):
+# 🔥 FIND MATCHING GUIDED FLOW
+def find_guided_flow(text, kb):
     text = text.lower()
-    matches = []
 
     for item in kb:
-        for k in item.get("keywords", []):
-            if k in text:
-                matches.extend(item.get("fixes", []))
+        if item.get("type") == "guided":
+            for t in item.get("triggers", []):
+                if t in text:
+                    return item
 
-    return matches
+    return None
 
 
-def safe_response(analysis="", fixes=None):
+# 🔥 START GUIDED SESSION
+def start_guided(flow):
     return {
-        "analysis": analysis or "No analysis available",
-        "fixes": fixes or []
+        "mode": "guided",
+        "flow": flow["name"],
+        "step": 0,
+        "question": flow["steps"][0]["question"]
+    }
+
+
+# 🔥 PROCESS ANSWER
+def next_step(flow, step_index, answer):
+    steps = flow["steps"]
+    step = steps[step_index]
+
+    key = "yes" if answer else "no"
+    result = step.get(key)
+
+    if isinstance(result, int):
+        next_step_data = steps[result]
+        return {
+            "done": False,
+            "step": result,
+            "question": next_step_data["question"]
+        }
+
+    return {
+        "done": True,
+        "result": result
     }
 
 
 def run_agent(user_input, memory):
     kb = load_kb()
-    kb_matches = match_kb(user_input, kb)
 
-    # 🔥 If no AI → still works great now
-    if not client:
-        return safe_response(
-            analysis="Hardware/software issue detected. Follow suggested checks.",
-            fixes=kb_matches
-        )
+    # 🔥 CONTINUE GUIDED
+    if memory.get("mode") == "guided":
+        flow = next((f for f in kb if f.get("name") == memory["flow"]), None)
 
-    try:
-        res = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": """You are an IT troubleshooting assistant.
-Return JSON:
-{
-  "analysis": "",
-  "fixes": [{"id":"","label":""}]
-}"""
-                },
-                {"role": "user", "content": user_input}
-            ],
-            response_format={"type": "json_object"}
-        )
+        if not flow:
+            return {"analysis": "Flow lost", "fixes": []}
 
-        raw = res.choices[0].message.content
+        answer = user_input.lower() in ["yes", "y"]
 
-        try:
-            result = json.loads(raw)
-        except:
-            return safe_response(
-                analysis="AI response failed. Using known troubleshooting steps.",
-                fixes=kb_matches
-            )
+        step_result = next_step(flow, memory["step"], answer)
 
-        # 🔥 SMART MERGE + HARDWARE PRIORITY
-        merged = {
-            f["id"]: f for f in (kb_matches + result.get("fixes", []))
+        if step_result["done"]:
+            return {
+                "analysis": f"Diagnosis: {step_result['result']}",
+                "fixes": []
+            }
+
+        memory["step"] = step_result["step"]
+
+        return {
+            "analysis": step_result["question"],
+            "fixes": []
         }
 
-        return safe_response(
-            analysis=result.get("analysis"),
-            fixes=list(merged.values())
-        )
+    # 🔥 START GUIDED IF MATCH
+    flow = find_guided_flow(user_input, kb)
 
-    except Exception as e:
-        return safe_response(
-            analysis=f"AI error: {str(e)}",
-            fixes=kb_matches
-        )
+    if flow:
+        session = start_guided(flow)
+
+        memory.update(session)
+
+        return {
+            "analysis": session["question"],
+            "fixes": []
+        }
+
+    # 🔥 FALLBACK (no guided match)
+    return {
+        "analysis": "No guided flow matched. Provide more detail.",
+        "fixes": []
+    }
