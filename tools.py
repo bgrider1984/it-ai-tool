@@ -3,6 +3,22 @@ import platform
 
 OS = platform.system()
 
+# Hardware fixes = informational only
+HARDWARE_FIXES = {
+    "check_power",
+    "check_psu",
+    "remove_battery",
+    "check_monitor",
+    "reseat_gpu",
+    "try_hdmi",
+    "clean_fans",
+    "check_thermal",
+    "improve_airflow",
+    "check_usb",
+    "replace_device"
+}
+
+
 def run_cmd(command):
     try:
         if OS == "Windows":
@@ -46,7 +62,15 @@ FIX_MAP = {
 
 def run_fix(fix_id):
     try:
+        # 🧠 HARDWARE HANDLING
+        if fix_id in HARDWARE_FIXES:
+            return {
+                "fix": fix_id,
+                "output": "Manual hardware step. Please perform physically."
+            }
+
         action = FIX_MAP.get(fix_id)
+
         if not action:
             return {"error": "Unknown fix"}
 
@@ -55,13 +79,21 @@ def run_fix(fix_id):
             "label": action["label"],
             "output": run_cmd(action["command"])
         }
+
     except Exception as e:
         return {"error": str(e)}
 
 
 def verify_fix(fix_id):
     try:
+        if fix_id in HARDWARE_FIXES:
+            return {
+                "fix": fix_id,
+                "verification": "Verify manually (visual/physical check)."
+            }
+
         action = FIX_MAP.get(fix_id)
+
         if not action:
             return {"error": "Unknown fix"}
 
@@ -69,5 +101,6 @@ def verify_fix(fix_id):
             "fix": fix_id,
             "verification": run_cmd(action["verify"])
         }
+
     except Exception as e:
         return {"error": str(e)}
