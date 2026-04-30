@@ -6,7 +6,7 @@
 
 <style>
 body { margin:0; font-family:Arial; background:#0b1220; color:#e5e7eb; }
-header { padding:12px; background:#111827; }
+header { padding:12px; background:#111827; font-weight:bold; }
 
 .container {
     display:grid;
@@ -61,24 +61,24 @@ button {
 
 <body>
 
-<header>AI Helpdesk</header>
+<header>AI Helpdesk (Guided Mode)</header>
 
 <div class="container">
 
 <div class="left">
 
-<textarea id="input" placeholder="Describe your issue..."></textarea>
+<textarea id="input" placeholder="Describe your issue or answer Yes/No..."></textarea>
 
 <br>
 <button id="analyzeBtn">Analyze</button>
 
 <div class="card">
-<b>Analysis</b>
+<b>Analysis / Next Step</b>
 <div id="analysis">Waiting...</div>
 </div>
 
 <div class="card">
-<b>Fixes</b>
+<b>Fixes (if applicable)</b>
 <div id="fixes"></div>
 </div>
 
@@ -104,12 +104,12 @@ button {
 
 <script>
 
-// 🔥 GUARANTEED BUTTON + ENTER WIRING
 const input = document.getElementById("input");
 const analyzeBtn = document.getElementById("analyzeBtn");
 
 analyzeBtn.addEventListener("click", run);
 
+// ENTER KEY SUPPORT
 input.addEventListener("keydown", function(e){
     if(e.key === "Enter" && !e.shiftKey){
         e.preventDefault();
@@ -133,7 +133,7 @@ async function run(){
         if(!text) return;
 
         document.getElementById("analysis").innerHTML =
-            "<span class='loading'>Analyzing...</span>";
+            "<span class='loading'>Thinking...</span>";
 
         const res = await fetch("/api/run",{
             method:"POST",
@@ -143,7 +143,7 @@ async function run(){
 
         const json = await res.json();
 
-        console.log("API RESPONSE:", json);
+        console.log("API:", json);
 
         if(!json.success){
             showError(json.error || "Unknown error");
@@ -153,22 +153,18 @@ async function run(){
 
         const data = json.data || {};
 
-        // ✅ FIXED PARSING
         document.getElementById("analysis").innerText =
-            data.analysis || "No analysis returned";
+            data.analysis || "No response";
 
-        // FIXES
+        // FIXES (only if present)
         const fixesDiv = document.getElementById("fixes");
         fixesDiv.innerHTML = "";
 
         (data.fixes || []).forEach(f=>{
-            fixesDiv.innerHTML += `
-            <div>
-                ${f.label}
-                <button onclick="runFix('${f.id}')">Run</button>
-                <button onclick="verifyFix('${f.id}')">Verify</button>
-            </div>`;
+            fixesDiv.innerHTML += `<div>${f.label}</div>`;
         });
+
+        input.value = "";
 
         loadTimeline();
 
@@ -176,24 +172,6 @@ async function run(){
         showError(err.message);
         document.getElementById("analysis").innerText = "Request failed";
     }
-}
-
-async function runFix(id){
-    await fetch("/api/fix",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({fix:id})
-    });
-    loadTimeline();
-}
-
-async function verifyFix(id){
-    await fetch("/api/verify",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({fix:id})
-    });
-    loadTimeline();
 }
 
 async function loadTimeline(){
@@ -209,7 +187,7 @@ async function loadTimeline(){
         (json.data.history || []).slice(-10).reverse().forEach(h=>{
             t.innerHTML += `
             <div>
-                <b>${h.type}</b>: ${h.input || h.fix}
+                <b>${h.type}</b>: ${h.input} → ${h.response || ""}
             </div>`;
         });
 
